@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -12,44 +9,47 @@ datasource db {
 model User {
   id        String   @id @default(uuid())
   email     String?  @unique
-  name      String?
+  name      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   bankConnections BankConnection[]
+  expenses        Expense[]
+  expenseSplits   ExpenseSplit[]
+  incomes         Income[]
 }
 
 model BankConnection {
-  id           String   @id @default(uuid())
-  userId       String
-  itemId       String   @unique
-  accessToken  String
-  institutionId String?
+  id              String   @id @default(uuid())
+  userId          String
+  itemId          String   @unique
+  accessToken     String
+  institutionId   String?
   institutionName String?
-  status       String   @default("active")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  status          String   @default("active")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accounts Account[]
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accounts     Account[]
   transactions Transaction[]
 
   @@index([userId])
 }
 
 model Account {
-  id              String   @id @default(uuid())
+  id               String   @id @default(uuid())
   bankConnectionId String
-  accountId       String   @unique
-  name            String
-  officialName    String?
-  type            String
-  subtype         String?
-  currentBalance  Float?
+  accountId        String   @unique
+  name             String
+  officialName     String?
+  type             String
+  subtype          String?
+  currentBalance   Float?
   availableBalance Float?
-  currency        String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  currency         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   bankConnection BankConnection @relation(fields: [bankConnectionId], references: [id], onDelete: Cascade)
   transactions   Transaction[]
@@ -70,13 +70,99 @@ model Transaction {
   category         String?
   pending          Boolean  @default(false)
   merchantName     String?
+  linkedToExpense  Boolean  @default(false)
+  expenseId        String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   bankConnection BankConnection @relation(fields: [bankConnectionId], references: [id], onDelete: Cascade)
   account        Account        @relation(fields: [accountId], references: [accountId], onDelete: Cascade)
+  expense        Expense?       @relation(fields: [expenseId], references: [id], onDelete: SetNull)
 
   @@index([bankConnectionId])
   @@index([accountId])
   @@index([date])
+  @@index([expenseId])
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  color       String?
+  icon        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  expenses    Expense[]
+
+  @@index([name])
+}
+
+model Expense {
+  id           String   @id @default(uuid())
+  date         DateTime
+  description  String
+  categoryId   String
+  amount       Float
+  currency     String   @default("EUR")
+  paidById     String
+  type         String   @default("shared")
+  paid         Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  category     Category       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  paidBy       User           @relation(fields: [paidById], references: [id], onDelete: Cascade)
+  splits       ExpenseSplit[]
+  transactions Transaction[]
+
+  @@index([date])
+  @@index([categoryId])
+  @@index([paidById])
+  @@index([type])
+}
+
+model ExpenseSplit {
+  id        String   @id @default(uuid())
+  expenseId String
+  userId    String
+  amount    Float
+  paid      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, userId])
+  @@index([expenseId])
+  @@index([userId])
+}
+
+model Income {
+  id          String   @id @default(uuid())
+  userId      String
+  date        DateTime
+  description String
+  amount      Float
+  currency    String   @default("EUR")
+  type        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([date])
+  @@index([type])
+}
+
+model Settings {
+  id              String   @id @default(uuid())
+  defaultAndreRatio Float   @default(0.5)
+  defaultRitaRatio  Float   @default(0.5)
+  defaultPaidBy     String   @default("andre")
+  defaultType       String   @default("shared")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }

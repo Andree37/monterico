@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { usePlaidLink } from "react-plaid-link";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
@@ -18,6 +18,7 @@ export function PlaidLink({
 }: PlaidLinkProps) {
     const [linkToken, setLinkToken] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    const [shouldOpen, setShouldOpen] = useState(false);
 
     const generateToken = async () => {
         setLoading(true);
@@ -31,6 +32,7 @@ export function PlaidLink({
             const data = await response.json();
             if (data.link_token) {
                 setLinkToken(data.link_token);
+                setShouldOpen(true);
             }
         } catch (error) {
             console.error("Error generating link token:", error);
@@ -69,6 +71,13 @@ export function PlaidLink({
 
     const { open, ready } = usePlaidLink(config);
 
+    useEffect(() => {
+        if (linkToken && ready && shouldOpen && !loading) {
+            open();
+            setShouldOpen(false);
+        }
+    }, [linkToken, ready, shouldOpen, loading, open]);
+
     const handleClick = () => {
         if (linkToken) {
             open();
@@ -76,10 +85,6 @@ export function PlaidLink({
             generateToken();
         }
     };
-
-    if (linkToken && ready && !loading) {
-        setTimeout(() => open(), 100);
-    }
 
     return (
         <Button
