@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String?  @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bankConnections BankConnection[]
+}
+
+model BankConnection {
+  id           String   @id @default(uuid())
+  userId       String
+  itemId       String   @unique
+  accessToken  String
+  institutionId String?
+  institutionName String?
+  status       String   @default("active")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accounts Account[]
+  transactions Transaction[]
+
+  @@index([userId])
+}
+
+model Account {
+  id              String   @id @default(uuid())
+  bankConnectionId String
+  accountId       String   @unique
+  name            String
+  officialName    String?
+  type            String
+  subtype         String?
+  currentBalance  Float?
+  availableBalance Float?
+  currency        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  bankConnection BankConnection @relation(fields: [bankConnectionId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+
+  @@index([bankConnectionId])
+  @@index([accountId])
+}
+
+model Transaction {
+  id               String   @id @default(uuid())
+  bankConnectionId String
+  accountId        String
+  transactionId    String   @unique
+  date             DateTime
+  name             String
+  amount           Float
+  currency         String?
+  category         String?
+  pending          Boolean  @default(false)
+  merchantName     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  bankConnection BankConnection @relation(fields: [bankConnectionId], references: [id], onDelete: Cascade)
+  account        Account        @relation(fields: [accountId], references: [accountId], onDelete: Cascade)
+
+  @@index([bankConnectionId])
+  @@index([accountId])
+  @@index([date])
+}
