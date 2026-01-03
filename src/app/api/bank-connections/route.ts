@@ -35,9 +35,11 @@ export async function GET(request: NextRequest) {
             bankConnections,
             count: bankConnections.length,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error fetching bank connections:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
@@ -61,8 +63,10 @@ export async function DELETE(request: NextRequest) {
             success: true,
             message: "Bank connection deleted",
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error deleting bank connection:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

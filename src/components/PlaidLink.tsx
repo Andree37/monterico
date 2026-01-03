@@ -42,7 +42,8 @@ export function PlaidLink({
     };
 
     const onPlaidSuccess = useCallback(
-        async (publicToken: string, metadata: any) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        async (publicToken: string, _metadata: unknown) => {
             try {
                 const response = await fetch("/api/plaid/exchange-token", {
                     method: "POST",

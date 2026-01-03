@@ -82,10 +82,13 @@ export async function POST(request: NextRequest) {
             success: true,
             transactionsStored: storedTransactions.length,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error fetching/storing transactions:", error);
 
-        if (error.response?.data?.error_code === "PRODUCT_NOT_READY") {
+        const errorResponse = (
+            error as { response?: { data?: { error_code?: string } } }
+        ).response;
+        if (errorResponse?.data?.error_code === "PRODUCT_NOT_READY") {
             return NextResponse.json(
                 {
                     error: "PRODUCT_NOT_READY",
@@ -97,8 +100,11 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        const responseData = errorResponse?.data;
         return NextResponse.json(
-            { error: error.response?.data || error.message },
+            { error: responseData || message },
             { status: 500 },
         );
     }
@@ -159,9 +165,11 @@ export async function GET(request: NextRequest) {
             transactions,
             count: transactions.length,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error fetching transactions:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
@@ -189,8 +197,10 @@ export async function PUT(request: NextRequest) {
             success: true,
             transaction,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error updating transaction:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

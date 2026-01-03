@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { PlaidLink } from "@/components/PlaidLink";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { toast } from "@/hooks/use-toast";
 import {
     Card,
     CardContent,
@@ -13,6 +14,14 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import {
     Loader2,
     RefreshCw,
@@ -78,10 +87,17 @@ interface Transaction {
 
 interface Settings {
     id: string;
-    defaultAndreRatio: number;
-    defaultRitaRatio: number;
-    defaultPaidBy: string;
+    defaultPaidBy: string | null;
     defaultType: string;
+    defaultSplitType: string;
+}
+
+interface User {
+    id: string;
+    name: string;
+    email: string | null;
+    ratio: number;
+    isActive: boolean;
 }
 
 export default function Home() {
@@ -90,16 +106,16 @@ export default function Home() {
     );
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
+    const [users, setUsers] = useState<User[]>([]);
     const [settings, setSettings] = useState<Settings | null>(null);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState<string | null>(null);
     const [syncingAll, setSyncingAll] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [editingSettings, setEditingSettings] = useState({
-        defaultAndreRatio: 0.5,
-        defaultRitaRatio: 0.5,
-        defaultPaidBy: "andre",
+        defaultPaidBy: "",
         defaultType: "shared",
+        defaultSplitType: "equal",
     });
     const [expandedTransaction, setExpandedTransaction] = useState<
         string | null
@@ -119,6 +135,16 @@ export default function Home() {
     }>({});
 
     const incomeTypes = ["Salario", "Beneficios", "Extras"];
+
+    const fetchUsers = async () => {
+        try {
+            const response = await fetch("/api/users");
+            const data = await response.json();
+            setUsers(data.filter((u: User) => u.isActive));
+        } catch (error) {
+            console.error("Error fetching users:", error);
+        }
+    };
 
     const fetchBankConnections = async () => {
         try {
@@ -169,10 +195,9 @@ export default function Home() {
             if (data.success && data.settings) {
                 setSettings(data.settings);
                 setEditingSettings({
-                    defaultAndreRatio: data.settings.defaultAndreRatio,
-                    defaultRitaRatio: data.settings.defaultRitaRatio,
-                    defaultPaidBy: data.settings.defaultPaidBy,
+                    defaultPaidBy: data.settings.defaultPaidBy || "",
                     defaultType: data.settings.defaultType,
+                    defaultSplitType: data.settings.defaultSplitType || "equal",
                 });
             }
         } catch (error) {
@@ -181,6 +206,7 @@ export default function Home() {
     };
 
     useEffect(() => {
+        fetchUsers();
         fetchBankConnections();
         fetchTransactions();
         fetchCategories();
@@ -254,17 +280,25 @@ export default function Home() {
             if (data.success) {
                 setSettings(data.settings);
                 setShowSettings(false);
-                alert("Settings saved successfully!");
+                toast({
+                    title: "Success",
+                    description: "Settings saved successfully!",
+                    type: "success",
+                });
             } else {
-                alert(
-                    `Failed to save settings: ${data.error || "Unknown error"}`,
-                );
+                toast({
+                    title: "Error",
+                    description: `Failed to save settings: ${data.error || "Unknown error"}`,
+                    type: "error",
+                });
             }
         } catch (error) {
             console.error("Error saving settings:", error);
-            alert(
-                `Error saving settings: ${error instanceof Error ? error.message : "Unknown error"}`,
-            );
+            toast({
+                title: "Error",
+                description: `Error saving settings: ${error instanceof Error ? error.message : "Unknown error"}`,
+                type: "error",
+            });
         }
     };
 
@@ -275,11 +309,13 @@ export default function Home() {
             setExpandedTransaction(transactionId);
             // Initialize quick import data with defaults
             if (!quickImport[transactionId]) {
+                const defaultUser = users.find((u) => u.isActive);
                 setQuickImport({
                     ...quickImport,
                     [transactionId]: {
                         categoryId: "",
-                        paidBy: settings?.defaultPaidBy || "andre",
+                        paidBy:
+                            settings?.defaultPaidBy || defaultUser?.id || "",
                         type: (settings?.defaultType || "shared") as
                             | "shared"
                             | "personal",
@@ -288,11 +324,12 @@ export default function Home() {
             }
             // Initialize quick income import with defaults
             if (!quickIncomeImport[transactionId]) {
+                const defaultUser = users.find((u) => u.isActive);
                 setQuickIncomeImport({
                     ...quickIncomeImport,
                     [transactionId]: {
                         incomeType: "",
-                        userId: "andre",
+                        userId: defaultUser?.id || "",
                     },
                 });
             }
@@ -302,7 +339,7 @@ export default function Home() {
     const updateQuickImport = (
         transactionId: string,
         field: string,
-        value: any,
+        value: string,
     ) => {
         setQuickImport({
             ...quickImport,
@@ -316,7 +353,11 @@ export default function Home() {
     const importTransactionInline = async (transaction: Transaction) => {
         const importData = quickImport[transaction.transactionId];
         if (!importData || !importData.categoryId) {
-            alert("Please select a category");
+            toast({
+                title: "Error",
+                description: "Please select a category",
+                type: "error",
+            });
             return;
         }
 
@@ -324,32 +365,20 @@ export default function Home() {
         let splits;
 
         if (importData.type === "personal") {
-            if (importData.paidBy === "andre") {
-                splits = [
-                    { userId: "andre", amount: amount, paid: true },
-                    { userId: "rita", amount: 0, paid: true },
-                ];
-            } else {
-                splits = [
-                    { userId: "andre", amount: 0, paid: true },
-                    { userId: "rita", amount: amount, paid: true },
-                ];
-            }
+            // Personal expense - assign full amount to payer
+            splits = users.map((user) => ({
+                userId: user.id,
+                amount: user.id === importData.paidBy ? amount : 0,
+                paid: true,
+            }));
         } else {
-            const andreRatio = settings?.defaultAndreRatio || 0.5;
-            const ritaRatio = settings?.defaultRitaRatio || 0.5;
-            splits = [
-                {
-                    userId: "andre",
-                    amount: amount * andreRatio,
-                    paid: true,
-                },
-                {
-                    userId: "rita",
-                    amount: amount * ritaRatio,
-                    paid: true,
-                },
-            ];
+            // Shared expense - split by ratios
+            const totalRatio = users.reduce((sum, u) => sum + u.ratio, 0);
+            splits = users.map((user) => ({
+                userId: user.id,
+                amount: (amount * user.ratio) / totalRatio,
+                paid: true,
+            }));
         }
 
         try {
@@ -386,12 +415,15 @@ export default function Home() {
     const importIncomeInline = async (transaction: Transaction) => {
         const importData = quickIncomeImport[transaction.transactionId];
         if (!importData || !importData.incomeType) {
-            alert("Please select an income type");
+            toast({
+                title: "Error",
+                description: "Please select an income type",
+                type: "error",
+            });
             return;
         }
 
         const amount = Math.abs(transaction.amount);
-        const monthKey = transaction.date.slice(0, 7); // YYYY-MM format
 
         try {
             const response = await fetch("/api/income", {
@@ -435,7 +467,7 @@ export default function Home() {
     const updateQuickIncomeImport = (
         transactionId: string,
         field: string,
-        value: any,
+        value: string,
     ) => {
         setQuickIncomeImport({
             ...quickIncomeImport,
@@ -507,106 +539,100 @@ export default function Home() {
                     <CardHeader>
                         <CardTitle>Default Import Settings</CardTitle>
                         <CardDescription>
-                            Set default values for quick transaction import
+                            Set default values for quick transaction import.
+                            <Link
+                                href="/settings"
+                                className="ml-2 text-primary underline"
+                            >
+                                Manage household members
+                            </Link>
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="grid gap-4 md:grid-cols-2">
                             <div>
-                                <label className="text-sm font-medium block mb-2">
-                                    Default Split Ratio
-                                </label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                        <label className="text-xs text-muted-foreground">
-                                            Andre (%)
-                                        </label>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            max="100"
-                                            step="1"
-                                            value={Math.round(
-                                                editingSettings.defaultAndreRatio *
-                                                    100,
-                                            )}
-                                            onChange={(e) => {
-                                                const ratio =
-                                                    parseInt(e.target.value) /
-                                                    100;
-                                                setEditingSettings({
-                                                    ...editingSettings,
-                                                    defaultAndreRatio: ratio,
-                                                    defaultRitaRatio: 1 - ratio,
-                                                });
-                                            }}
-                                            className="w-full p-2 border rounded"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-muted-foreground">
-                                            Rita (%)
-                                        </label>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            max="100"
-                                            step="1"
-                                            value={Math.round(
-                                                editingSettings.defaultRitaRatio *
-                                                    100,
-                                            )}
-                                            onChange={(e) => {
-                                                const ratio =
-                                                    parseInt(e.target.value) /
-                                                    100;
-                                                setEditingSettings({
-                                                    ...editingSettings,
-                                                    defaultAndreRatio:
-                                                        1 - ratio,
-                                                    defaultRitaRatio: ratio,
-                                                });
-                                            }}
-                                            className="w-full p-2 border rounded"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium block mb-2">
+                                <Label className="block mb-2">
                                     Default Paid By
-                                </label>
-                                <select
+                                </Label>
+                                <Select
                                     value={editingSettings.defaultPaidBy}
-                                    onChange={(e) =>
+                                    onValueChange={(value) =>
                                         setEditingSettings({
                                             ...editingSettings,
-                                            defaultPaidBy: e.target.value,
+                                            defaultPaidBy: value,
                                         })
                                     }
-                                    className="w-full p-2 border rounded"
                                 >
-                                    <option value="andre">Andre Ribeiro</option>
-                                    <option value="rita">Rita Pereira</option>
-                                </select>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="None" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="">None</SelectItem>
+                                        {users.map((user) => (
+                                            <SelectItem
+                                                key={user.id}
+                                                value={user.id}
+                                            >
+                                                {user.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div>
-                                <label className="text-sm font-medium block mb-2">
+                                <Label className="block mb-2">
                                     Default Type
-                                </label>
-                                <select
+                                </Label>
+                                <Select
                                     value={editingSettings.defaultType}
-                                    onChange={(e) =>
+                                    onValueChange={(value) =>
                                         setEditingSettings({
                                             ...editingSettings,
-                                            defaultType: e.target.value,
+                                            defaultType: value,
                                         })
                                     }
-                                    className="w-full p-2 border rounded"
                                 >
-                                    <option value="shared">Shared</option>
-                                    <option value="personal">Personal</option>
-                                </select>
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="shared">
+                                            Shared
+                                        </SelectItem>
+                                        <SelectItem value="personal">
+                                            Personal
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label className="block mb-2">
+                                    Default Split Type
+                                </Label>
+                                <Select
+                                    value={editingSettings.defaultSplitType}
+                                    onValueChange={(value) =>
+                                        setEditingSettings({
+                                            ...editingSettings,
+                                            defaultSplitType: value,
+                                        })
+                                    }
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="equal">
+                                            Equal
+                                        </SelectItem>
+                                        <SelectItem value="ratio">
+                                            By Ratio
+                                        </SelectItem>
+                                        <SelectItem value="custom">
+                                            Custom
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
                         </div>
                         <div className="flex gap-2 mt-4">
@@ -755,7 +781,7 @@ export default function Home() {
                                     {transactions.map((transaction) => {
                                         const isExpense =
                                             transaction.amount > 0;
-                                        const isIncome = transaction.amount < 0;
+
                                         const isTracked =
                                             transaction.linkedToExpense ||
                                             transaction.linkedToIncome;
@@ -880,7 +906,7 @@ export default function Home() {
                                                             {isExpense ? (
                                                                 <>
                                                                     <div className="grid grid-cols-3 gap-2">
-                                                                        <select
+                                                                        <Select
                                                                             value={
                                                                                 quickImport[
                                                                                     transaction
@@ -889,45 +915,44 @@ export default function Home() {
                                                                                     ?.categoryId ||
                                                                                 ""
                                                                             }
-                                                                            onChange={(
-                                                                                e,
+                                                                            onValueChange={(
+                                                                                value,
                                                                             ) =>
                                                                                 updateQuickImport(
                                                                                     transaction.transactionId,
                                                                                     "categoryId",
-                                                                                    e
-                                                                                        .target
-                                                                                        .value,
+                                                                                    value,
                                                                                 )
                                                                             }
-                                                                            className="p-2 border rounded text-sm"
                                                                         >
-                                                                            <option value="">
-                                                                                Category...
-                                                                            </option>
-                                                                            {categories.map(
-                                                                                (
-                                                                                    cat,
-                                                                                ) => (
-                                                                                    <option
-                                                                                        key={
-                                                                                            cat.id
-                                                                                        }
-                                                                                        value={
-                                                                                            cat.id
-                                                                                        }
-                                                                                    >
-                                                                                        {
-                                                                                            cat.icon
-                                                                                        }{" "}
-                                                                                        {
-                                                                                            cat.name
-                                                                                        }
-                                                                                    </option>
-                                                                                ),
-                                                                            )}
-                                                                        </select>
-                                                                        <select
+                                                                            <SelectTrigger className="h-8 text-sm">
+                                                                                <SelectValue placeholder="Category..." />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {categories.map(
+                                                                                    (
+                                                                                        cat,
+                                                                                    ) => (
+                                                                                        <SelectItem
+                                                                                            key={
+                                                                                                cat.id
+                                                                                            }
+                                                                                            value={
+                                                                                                cat.id
+                                                                                            }
+                                                                                        >
+                                                                                            {
+                                                                                                cat.icon
+                                                                                            }{" "}
+                                                                                            {
+                                                                                                cat.name
+                                                                                            }
+                                                                                        </SelectItem>
+                                                                                    ),
+                                                                                )}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                        <Select
                                                                             value={
                                                                                 quickImport[
                                                                                     transaction
@@ -935,29 +960,43 @@ export default function Home() {
                                                                                 ]
                                                                                     ?.paidBy ||
                                                                                 settings?.defaultPaidBy ||
-                                                                                "andre"
+                                                                                ""
                                                                             }
-                                                                            onChange={(
-                                                                                e,
+                                                                            onValueChange={(
+                                                                                value,
                                                                             ) =>
                                                                                 updateQuickImport(
                                                                                     transaction.transactionId,
                                                                                     "paidBy",
-                                                                                    e
-                                                                                        .target
-                                                                                        .value,
+                                                                                    value,
                                                                                 )
                                                                             }
-                                                                            className="p-2 border rounded text-sm"
                                                                         >
-                                                                            <option value="andre">
-                                                                                Andre
-                                                                            </option>
-                                                                            <option value="rita">
-                                                                                Rita
-                                                                            </option>
-                                                                        </select>
-                                                                        <select
+                                                                            <SelectTrigger className="h-8 text-sm">
+                                                                                <SelectValue placeholder="Paid By..." />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {users.map(
+                                                                                    (
+                                                                                        user,
+                                                                                    ) => (
+                                                                                        <SelectItem
+                                                                                            key={
+                                                                                                user.id
+                                                                                            }
+                                                                                            value={
+                                                                                                user.id
+                                                                                            }
+                                                                                        >
+                                                                                            {
+                                                                                                user.name
+                                                                                            }
+                                                                                        </SelectItem>
+                                                                                    ),
+                                                                                )}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                        <Select
                                                                             value={
                                                                                 quickImport[
                                                                                     transaction
@@ -967,26 +1006,28 @@ export default function Home() {
                                                                                 settings?.defaultType ||
                                                                                 "shared"
                                                                             }
-                                                                            onChange={(
-                                                                                e,
+                                                                            onValueChange={(
+                                                                                value,
                                                                             ) =>
                                                                                 updateQuickImport(
                                                                                     transaction.transactionId,
                                                                                     "type",
-                                                                                    e
-                                                                                        .target
-                                                                                        .value,
+                                                                                    value,
                                                                                 )
                                                                             }
-                                                                            className="p-2 border rounded text-sm"
                                                                         >
-                                                                            <option value="shared">
-                                                                                Shared
-                                                                            </option>
-                                                                            <option value="personal">
-                                                                                Personal
-                                                                            </option>
-                                                                        </select>
+                                                                            <SelectTrigger className="h-8 text-sm">
+                                                                                <SelectValue />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                <SelectItem value="shared">
+                                                                                    Shared
+                                                                                </SelectItem>
+                                                                                <SelectItem value="personal">
+                                                                                    Personal
+                                                                                </SelectItem>
+                                                                            </SelectContent>
+                                                                        </Select>
                                                                     </div>
                                                                     <div className="flex gap-2 mt-2">
                                                                         <Button
@@ -1026,28 +1067,26 @@ export default function Home() {
                                                                     ]?.type ===
                                                                         "shared" && (
                                                                         <p className="text-xs text-muted-foreground mt-2">
-                                                                            Split:{" "}
-                                                                            {Math.round(
-                                                                                (settings?.defaultAndreRatio ||
-                                                                                    0.5) *
-                                                                                    100,
-                                                                            )}
-                                                                            %
-                                                                            Andre,{" "}
-                                                                            {Math.round(
-                                                                                (settings?.defaultRitaRatio ||
-                                                                                    0.5) *
-                                                                                    100,
-                                                                            )}
-                                                                            %
-                                                                            Rita
+                                                                            Split
+                                                                            by
+                                                                            ratio:{" "}
+                                                                            {users
+                                                                                .map(
+                                                                                    (
+                                                                                        u,
+                                                                                    ) =>
+                                                                                        `${u.name} ${Math.round(u.ratio * 100)}%`,
+                                                                                )
+                                                                                .join(
+                                                                                    ", ",
+                                                                                )}
                                                                         </p>
                                                                     )}
                                                                 </>
                                                             ) : (
                                                                 <>
                                                                     <div className="grid grid-cols-2 gap-2">
-                                                                        <select
+                                                                        <Select
                                                                             value={
                                                                                 quickIncomeImport[
                                                                                     transaction
@@ -1056,71 +1095,83 @@ export default function Home() {
                                                                                     ?.incomeType ||
                                                                                 ""
                                                                             }
-                                                                            onChange={(
-                                                                                e,
+                                                                            onValueChange={(
+                                                                                value,
                                                                             ) =>
                                                                                 updateQuickIncomeImport(
                                                                                     transaction.transactionId,
                                                                                     "incomeType",
-                                                                                    e
-                                                                                        .target
-                                                                                        .value,
+                                                                                    value,
                                                                                 )
                                                                             }
-                                                                            className="p-2 border rounded text-sm"
                                                                         >
-                                                                            <option value="">
-                                                                                Income
-                                                                                Type...
-                                                                            </option>
-                                                                            {incomeTypes.map(
-                                                                                (
-                                                                                    type,
-                                                                                ) => (
-                                                                                    <option
-                                                                                        key={
-                                                                                            type
-                                                                                        }
-                                                                                        value={
-                                                                                            type
-                                                                                        }
-                                                                                    >
-                                                                                        {
-                                                                                            type
-                                                                                        }
-                                                                                    </option>
-                                                                                ),
-                                                                            )}
-                                                                        </select>
-                                                                        <select
+                                                                            <SelectTrigger className="h-8 text-sm">
+                                                                                <SelectValue placeholder="Income Type..." />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {incomeTypes.map(
+                                                                                    (
+                                                                                        type,
+                                                                                    ) => (
+                                                                                        <SelectItem
+                                                                                            key={
+                                                                                                type
+                                                                                            }
+                                                                                            value={
+                                                                                                type
+                                                                                            }
+                                                                                        >
+                                                                                            {
+                                                                                                type
+                                                                                            }
+                                                                                        </SelectItem>
+                                                                                    ),
+                                                                                )}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                        <Select
                                                                             value={
                                                                                 quickIncomeImport[
                                                                                     transaction
                                                                                         .transactionId
                                                                                 ]
                                                                                     ?.userId ||
-                                                                                "andre"
+                                                                                ""
                                                                             }
-                                                                            onChange={(
-                                                                                e,
+                                                                            onValueChange={(
+                                                                                value,
                                                                             ) =>
                                                                                 updateQuickIncomeImport(
                                                                                     transaction.transactionId,
                                                                                     "userId",
-                                                                                    e
-                                                                                        .target
-                                                                                        .value,
+                                                                                    value,
                                                                                 )
                                                                             }
-                                                                            className="p-2 border rounded text-sm"
                                                                         >
-                                                                            <option value="andre">
-                                                                                Andre
-                                                                            </option>
-                                                                            <option value="rita">
-                                                                                Rita
-                                                                            </option>
-                                                                        </select>
+                                                                            <SelectTrigger className="h-8 text-sm">
+                                                                                <SelectValue placeholder="For..." />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {users.map(
+                                                                                    (
+                                                                                        user,
+                                                                                    ) => (
+                                                                                        <SelectItem
+                                                                                            key={
+                                                                                                user.id
+                                                                                            }
+                                                                                            value={
+                                                                                                user.id
+                                                                                            }
+                                                                                        >
+                                                                                            {
+                                                                                                user.name
+                                                                                            }
+                                                                                        </SelectItem>
+                                                                                    ),
+                                                                                )}
+                                                                            </SelectContent>
+                                                                        </Select>
                                                                     </div>
                                                                     <div className="flex gap-2 mt-2">
                                                                         <Button

@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "@/hooks/use-toast";
 import {
     Card,
     CardContent,
@@ -10,7 +13,6 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import {
     Dialog,
     DialogContent,
@@ -19,8 +21,22 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Loader2, ArrowLeft } from "lucide-react";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Plus, Loader2, ArrowLeft, Settings } from "lucide-react";
 import Link from "next/link";
+import CustomSplitsInput from "@/components/expenses/CustomSplitsInput";
+import CategoryPieCharts from "@/components/analytics/CategoryPieCharts";
+import MonthlyOverviewChart from "@/components/analytics/MonthlyOverviewChart";
+import SpendingTrendChart from "@/components/analytics/SpendingTrendChart";
+import CategoryComparisonChart from "@/components/analytics/CategoryComparisonChart";
+import ExpenseTypeCards from "@/components/analytics/ExpenseTypeCards";
+import SummaryCards from "@/components/analytics/SummaryCards";
 
 interface Category {
     id: string;
@@ -32,6 +48,9 @@ interface Category {
 interface User {
     id: string;
     name: string;
+    email: string | null;
+    ratio?: number;
+    isActive?: boolean;
 }
 
 interface ExpenseSplit {
@@ -66,33 +85,32 @@ interface Income {
     user: User;
 }
 
-interface MonthlyIncome {
-    [key: string]: {
-        andre: { [type: string]: number };
-        rita: { [type: string]: number };
-    };
+interface Split {
+    userId: string;
+    amount: number;
 }
 
 export default function ExpensesPage() {
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
+    const [users, setUsers] = useState<User[]>([]);
     const [incomes, setIncomes] = useState<Income[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddDialog, setShowAddDialog] = useState(false);
     const [selectedMonth, setSelectedMonth] = useState<string>("all");
+    const [selectedYear, setSelectedYear] = useState<string>("all");
     const [budgetYear, setBudgetYear] = useState<string>("");
     const [budgetMonthNum, setBudgetMonthNum] = useState<string>("");
     const [selectedCategory, setSelectedCategory] = useState<string>("all");
+    const [customSplits, setCustomSplits] = useState<Split[]>([]);
     const [formData, setFormData] = useState({
         date: new Date().toISOString().split("T")[0],
         description: "",
         categoryId: "",
         amount: "",
-        paidById: "andre",
+        paidById: "",
         type: "shared",
-        splitType: "equal",
-        andreAmount: "",
-        ritaAmount: "",
+        splitType: "equal" as "equal" | "ratio" | "custom",
     });
 
     const [editingIncome, setEditingIncome] = useState<{
@@ -102,6 +120,7 @@ export default function ExpensesPage() {
     const incomeTypes = ["Salario", "Beneficios", "Extras"];
 
     useEffect(() => {
+        fetchUsers();
         fetchExpenses();
         fetchCategories();
         fetchIncomes();
@@ -115,6 +134,55 @@ export default function ExpensesPage() {
             setBudgetMonthNum(String(now.getMonth() + 1).padStart(2, "0"));
         }
     }, [budgetYear, budgetMonthNum]);
+
+    // Initialize custom splits when users or amount changes
+    useEffect(() => {
+        if (users.length > 0 && formData.amount) {
+            const amount = parseFloat(formData.amount) || 0;
+            const activeUsers = users.filter((u) => u.isActive);
+
+            if (formData.splitType === "equal") {
+                const splitAmount = amount / activeUsers.length;
+                setCustomSplits(
+                    activeUsers.map((u) => ({
+                        userId: u.id,
+                        amount: splitAmount,
+                    })),
+                );
+            } else if (formData.splitType === "ratio") {
+                const totalRatio = activeUsers.reduce(
+                    (sum, u) => sum + (u.ratio || 1),
+                    0,
+                );
+                setCustomSplits(
+                    activeUsers.map((u) => ({
+                        userId: u.id,
+                        amount: (amount * (u.ratio || 1)) / totalRatio,
+                    })),
+                );
+            }
+        }
+    }, [users, formData.amount, formData.splitType]);
+
+    // Set default paidBy when users are loaded
+    useEffect(() => {
+        if (users.length > 0 && !formData.paidById) {
+            const activeUser = users.find((u) => u.isActive);
+            if (activeUser) {
+                setFormData((prev) => ({ ...prev, paidById: activeUser.id }));
+            }
+        }
+    }, [users, formData.paidById]);
+
+    const fetchUsers = async () => {
+        try {
+            const response = await fetch("/api/users");
+            const data = await response.json();
+            setUsers(data);
+        } catch (error) {
+            console.error("Error fetching users:", error);
+        }
+    };
 
     const fetchExpenses = async () => {
         try {
@@ -158,28 +226,27 @@ export default function ExpensesPage() {
         e.preventDefault();
 
         const amount = parseFloat(formData.amount);
-        let splits = [];
 
-        if (formData.splitType === "equal") {
-            const splitAmount = amount / 2;
-            splits = [
-                { userId: "andre", amount: splitAmount, paid: false },
-                { userId: "rita", amount: splitAmount, paid: false },
-            ];
-        } else {
-            splits = [
-                {
-                    userId: "andre",
-                    amount: parseFloat(formData.andreAmount),
-                    paid: false,
-                },
-                {
-                    userId: "rita",
-                    amount: parseFloat(formData.ritaAmount),
-                    paid: false,
-                },
-            ];
+        // Validate splits for custom type
+        if (formData.splitType === "custom") {
+            const totalSplit = customSplits.reduce(
+                (sum, s) => sum + s.amount,
+                0,
+            );
+            if (Math.abs(totalSplit - amount) > 0.01) {
+                toast({
+                    title: "Error",
+                    description: "Splits must sum to the total amount",
+                    type: "error",
+                });
+                return;
+            }
         }
+
+        const splits = customSplits.map((split) => ({
+            ...split,
+            paid: false,
+        }));
 
         try {
             const response = await fetch("/api/expenses", {
@@ -201,17 +268,17 @@ export default function ExpensesPage() {
             if (data.success) {
                 await fetchExpenses();
                 setShowAddDialog(false);
+                const activeUser = users.find((u) => u.isActive);
                 setFormData({
                     date: new Date().toISOString().split("T")[0],
                     description: "",
                     categoryId: "",
                     amount: "",
-                    paidById: "andre",
+                    paidById: activeUser?.id || "",
                     type: "shared",
                     splitType: "equal",
-                    andreAmount: "",
-                    ritaAmount: "",
                 });
+                setCustomSplits([]);
             }
         } catch (error) {
             console.error("Error creating expense:", error);
@@ -244,26 +311,22 @@ export default function ExpensesPage() {
     ) => {
         const numAmount = parseFloat(amount) || 0;
 
-        // Find existing MANUAL income entry for this month, user, and type (not from transactions)
         const monthStart = new Date(budgetMonth + "-01");
         const existingIncome = incomes.find(
             (inc) =>
                 inc.userId === userId &&
                 inc.type === type &&
                 new Date(inc.date).getMonth() === monthStart.getMonth() &&
-                new Date(inc.date).getFullYear() === monthStart.getFullYear() &&
-                !inc.transactions?.length, // Only manual entries (not linked to transactions)
+                new Date(inc.date).getFullYear() === monthStart.getFullYear(),
         );
 
         try {
             if (existingIncome) {
                 if (numAmount === 0) {
-                    // Delete if amount is 0
                     await fetch(`/api/income?id=${existingIncome.id}`, {
                         method: "DELETE",
                     });
                 } else {
-                    // Update existing
                     await fetch("/api/income", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -279,7 +342,6 @@ export default function ExpensesPage() {
                     });
                 }
             } else if (numAmount > 0) {
-                // Create new
                 await fetch("/api/income", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -302,7 +364,6 @@ export default function ExpensesPage() {
     const getIncomeAmount = (userId: string, type: string): number => {
         if (!budgetMonth) return 0;
         const monthStart = new Date(budgetMonth + "-01");
-        // Sum all income for this user/type/month (from both transactions and manual entries)
         return incomes
             .filter(
                 (inc) =>
@@ -344,11 +405,16 @@ export default function ExpensesPage() {
     };
 
     const filteredExpenses = expenses.filter((exp) => {
+        const expenseMonthKey = getMonthKey(exp.date);
+        const [expenseYear] = expenseMonthKey.split("-");
+
+        const yearMatch =
+            selectedYear === "all" || expenseYear === selectedYear;
         const monthMatch =
-            selectedMonth === "all" || getMonthKey(exp.date) === selectedMonth;
+            selectedMonth === "all" || expenseMonthKey === selectedMonth;
         const categoryMatch =
             selectedCategory === "all" || exp.category.id === selectedCategory;
-        return monthMatch && categoryMatch;
+        return yearMatch && monthMatch && categoryMatch;
     });
 
     const currentMonth = new Date().toISOString().slice(0, 7);
@@ -362,6 +428,12 @@ export default function ExpensesPage() {
     const availableYears = Array.from(
         new Set(availableMonths.map((m) => m.split("-")[0])),
     ).sort((a, b) => b.localeCompare(a));
+
+    // Filter available months by selected year
+    const filteredAvailableMonths =
+        selectedYear === "all"
+            ? availableMonths
+            : availableMonths.filter((m) => m.startsWith(selectedYear));
 
     const budgetMonth =
         budgetYear && budgetMonthNum ? `${budgetYear}-${budgetMonthNum}` : "";
@@ -381,11 +453,13 @@ export default function ExpensesPage() {
         "Dezembro",
     ];
 
-    const calculateStats = () => {
-        // For budget tab, use budgetMonth; otherwise use all filtered expenses
-        const expensesForStats = filteredExpenses;
+    const activeUsers = users.filter((u) => u.isActive);
 
-        // Filter expenses by budget month for budget calculations
+    const calculateStats = (useFilteredExpenses = true) => {
+        const expensesForStats = useFilteredExpenses
+            ? filteredExpenses
+            : expenses;
+
         const budgetMonthExpenses =
             budgetMonth !== "all"
                 ? expenses.filter(
@@ -393,80 +467,80 @@ export default function ExpensesPage() {
                   )
                 : expenses;
 
-        // Total spending (all expenses - for tracking)
-        const andreTotal = expensesForStats.reduce((sum, exp) => {
-            const andreSplit = exp.splits.find((s) => s.userId === "andre");
-            return sum + (andreSplit?.amount || 0);
-        }, 0);
+        // Calculate totals per user
+        const userTotals: { [userId: string]: number } = {};
+        const userBudgetTotals: { [userId: string]: number } = {};
 
-        const ritaTotal = expensesForStats.reduce((sum, exp) => {
-            const ritaSplit = exp.splits.find((s) => s.userId === "rita");
-            return sum + (ritaSplit?.amount || 0);
-        }, 0);
+        activeUsers.forEach((user) => {
+            userTotals[user.id] = expensesForStats.reduce((sum, exp) => {
+                const userSplit = exp.splits.find((s) => s.userId === user.id);
+                return sum + (userSplit?.amount || 0);
+            }, 0);
 
-        const total = andreTotal + ritaTotal;
+            userBudgetTotals[user.id] = budgetMonthExpenses.reduce(
+                (sum, exp) => {
+                    const userSplit = exp.splits.find(
+                        (s) => s.userId === user.id,
+                    );
+                    return sum + (userSplit?.amount || 0);
+                },
+                0,
+            );
+        });
 
-        // Budget month totals (for Budget tab)
-        const andreBudgetTotal = budgetMonthExpenses.reduce((sum, exp) => {
-            const andreSplit = exp.splits.find((s) => s.userId === "andre");
-            return sum + (andreSplit?.amount || 0);
-        }, 0);
+        const total = Object.values(userTotals).reduce(
+            (sum, val) => sum + val,
+            0,
+        );
 
-        const ritaBudgetTotal = budgetMonthExpenses.reduce((sum, exp) => {
-            const ritaSplit = exp.splits.find((s) => s.userId === "rita");
-            return sum + (ritaSplit?.amount || 0);
-        }, 0);
-
-        // Balance calculation (only unpaid shared expenses)
-        // For shared expenses: person who didn't pay owes their share to person who did pay
+        // Balance calculation for unpaid shared expenses
         const unpaidSharedExpenses = filteredExpenses.filter(
             (exp) => !exp.paid && exp.type === "shared",
         );
 
-        // Calculate what each person paid vs what they owe
-        let andreBalance = 0;
-        let ritaBalance = 0;
-
-        unpaidSharedExpenses.forEach((exp) => {
-            const andreSplit = exp.splits.find((s) => s.userId === "andre");
-            const ritaSplit = exp.splits.find((s) => s.userId === "rita");
-            const andreShare = andreSplit?.amount || 0;
-            const ritaShare = ritaSplit?.amount || 0;
-
-            if (exp.paidById === "andre") {
-                // Andre paid, so he's owed Rita's share
-                andreBalance += ritaShare;
-            } else if (exp.paidById === "rita") {
-                // Rita paid, so she's owed Andre's share
-                ritaBalance += andreShare;
-            }
+        const userBalances: { [userId: string]: number } = {};
+        activeUsers.forEach((user) => {
+            userBalances[user.id] = 0;
         });
 
-        // Net balance: who owes who
-        const andreOwes = Math.max(0, ritaBalance - andreBalance);
-        const ritaOwes = Math.max(0, andreBalance - ritaBalance);
+        unpaidSharedExpenses.forEach((exp) => {
+            exp.splits.forEach((split) => {
+                if (split.userId !== exp.paidBy.id) {
+                    // This user owes the payer their share
+                    userBalances[split.userId] =
+                        (userBalances[split.userId] || 0) - split.amount;
+                    userBalances[exp.paidBy.id] =
+                        (userBalances[exp.paidBy.id] || 0) + split.amount;
+                }
+            });
+        });
 
+        // Category totals per user
         const categoryTotals: {
-            [key: string]: { andre: number; rita: number };
+            [key: string]: { [userId: string]: number };
         } = {};
 
         filteredExpenses.forEach((exp) => {
             if (!categoryTotals[exp.category.name]) {
-                categoryTotals[exp.category.name] = { andre: 0, rita: 0 };
+                categoryTotals[exp.category.name] = {};
+                activeUsers.forEach((user) => {
+                    categoryTotals[exp.category.name][user.id] = 0;
+                });
             }
-            const andreSplit = exp.splits.find((s) => s.userId === "andre");
-            const ritaSplit = exp.splits.find((s) => s.userId === "rita");
 
-            categoryTotals[exp.category.name].andre += andreSplit?.amount || 0;
-            categoryTotals[exp.category.name].rita += ritaSplit?.amount || 0;
+            exp.splits.forEach((split) => {
+                categoryTotals[exp.category.name][split.userId] =
+                    (categoryTotals[exp.category.name][split.userId] || 0) +
+                    split.amount;
+            });
         });
 
+        // Month totals per user
         const monthTotals: {
             [monthKey: string]: {
-                andre: number;
-                rita: number;
+                totals: { [userId: string]: number };
                 byCategory: {
-                    [categoryName: string]: { andre: number; rita: number };
+                    [categoryName: string]: { [userId: string]: number };
                 };
             };
         } = {};
@@ -474,36 +548,40 @@ export default function ExpensesPage() {
         filteredExpenses.forEach((exp) => {
             const monthKey = getMonthKey(exp.date);
             if (!monthTotals[monthKey]) {
-                monthTotals[monthKey] = { andre: 0, rita: 0, byCategory: {} };
+                monthTotals[monthKey] = { totals: {}, byCategory: {} };
+                activeUsers.forEach((user) => {
+                    monthTotals[monthKey].totals[user.id] = 0;
+                });
             }
 
-            const andreSplit = exp.splits.find((s) => s.userId === "andre");
-            const ritaSplit = exp.splits.find((s) => s.userId === "rita");
+            exp.splits.forEach((split) => {
+                monthTotals[monthKey].totals[split.userId] =
+                    (monthTotals[monthKey].totals[split.userId] || 0) +
+                    split.amount;
 
-            monthTotals[monthKey].andre += andreSplit?.amount || 0;
-            monthTotals[monthKey].rita += ritaSplit?.amount || 0;
+                if (!monthTotals[monthKey].byCategory[exp.category.name]) {
+                    monthTotals[monthKey].byCategory[exp.category.name] = {};
+                    activeUsers.forEach((user) => {
+                        monthTotals[monthKey].byCategory[exp.category.name][
+                            user.id
+                        ] = 0;
+                    });
+                }
 
-            if (!monthTotals[monthKey].byCategory[exp.category.name]) {
-                monthTotals[monthKey].byCategory[exp.category.name] = {
-                    andre: 0,
-                    rita: 0,
-                };
-            }
-
-            monthTotals[monthKey].byCategory[exp.category.name].andre +=
-                andreSplit?.amount || 0;
-            monthTotals[monthKey].byCategory[exp.category.name].rita +=
-                ritaSplit?.amount || 0;
+                monthTotals[monthKey].byCategory[exp.category.name][
+                    split.userId
+                ] =
+                    (monthTotals[monthKey].byCategory[exp.category.name][
+                        split.userId
+                    ] || 0) + split.amount;
+            });
         });
 
         return {
-            andreTotal,
-            ritaTotal,
+            userTotals,
+            userBudgetTotals,
+            userBalances,
             total,
-            andreOwes,
-            ritaOwes,
-            andreBudgetTotal,
-            ritaBudgetTotal,
             categoryTotals,
             monthTotals,
         };
@@ -533,287 +611,239 @@ export default function ExpensesPage() {
                             Gastos Pessoais
                         </h1>
                         <p className="text-muted-foreground mt-2">
-                            Track shared expenses with Rita
+                            Track household expenses
                         </p>
                     </div>
                 </div>
 
-                <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-                    <DialogTrigger asChild>
-                        <Button>
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add Expense
+                <div className="flex gap-2">
+                    <Link href="/settings">
+                        <Button variant="outline">
+                            <Settings className="mr-2 h-4 w-4" />
+                            Settings
                         </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Add New Expense</DialogTitle>
-                            <DialogDescription>
-                                Create a new shared expense
-                            </DialogDescription>
-                        </DialogHeader>
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            <div>
-                                <label className="text-sm font-medium">
-                                    Date
-                                </label>
-                                <input
-                                    type="date"
-                                    value={formData.date}
-                                    onChange={(e) =>
-                                        setFormData({
-                                            ...formData,
-                                            date: e.target.value,
-                                        })
-                                    }
-                                    className="w-full p-2 border rounded"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label className="text-sm font-medium">
-                                    Description
-                                </label>
-                                <input
-                                    type="text"
-                                    value={formData.description}
-                                    onChange={(e) =>
-                                        setFormData({
-                                            ...formData,
-                                            description: e.target.value,
-                                        })
-                                    }
-                                    className="w-full p-2 border rounded"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label className="text-sm font-medium">
-                                    Category
-                                </label>
-                                <select
-                                    value={formData.categoryId}
-                                    onChange={(e) =>
-                                        setFormData({
-                                            ...formData,
-                                            categoryId: e.target.value,
-                                        })
-                                    }
-                                    className="w-full p-2 border rounded"
-                                    required
-                                >
-                                    <option value="">Select category</option>
-                                    {categories.map((cat) => (
-                                        <option key={cat.id} value={cat.id}>
-                                            {cat.icon} {cat.name}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="text-sm font-medium">
-                                    Amount
-                                </label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    value={formData.amount}
-                                    onChange={(e) =>
-                                        setFormData({
-                                            ...formData,
-                                            amount: e.target.value,
-                                        })
-                                    }
-                                    className="w-full p-2 border rounded"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label className="text-sm font-medium">
-                                    Paid By
-                                </label>
-                                <select
-                                    value={formData.paidById}
-                                    onChange={(e) =>
-                                        setFormData({
-                                            ...formData,
-                                            paidById: e.target.value,
-                                        })
-                                    }
-                                    className="w-full p-2 border rounded"
-                                >
-                                    <option value="andre">Andre Ribeiro</option>
-                                    <option value="rita">Rita Pereira</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="text-sm font-medium">
-                                    Type
-                                </label>
-                                <select
-                                    value={formData.type}
-                                    onChange={(e) =>
-                                        setFormData({
-                                            ...formData,
-                                            type: e.target.value,
-                                        })
-                                    }
-                                    className="w-full p-2 border rounded"
-                                >
-                                    <option value="shared">Partilhado</option>
-                                    <option value="personal">Pessoal</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="text-sm font-medium">
-                                    Split Type
-                                </label>
-                                <select
-                                    value={formData.splitType}
-                                    onChange={(e) =>
-                                        setFormData({
-                                            ...formData,
-                                            splitType: e.target.value,
-                                        })
-                                    }
-                                    className="w-full p-2 border rounded"
-                                >
-                                    <option value="equal">Equal Split</option>
-                                    <option value="custom">Custom Split</option>
-                                </select>
-                            </div>
-
-                            {formData.splitType === "custom" && (
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-sm font-medium">
-                                            Andre Amount
-                                        </label>
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.andreAmount}
-                                            onChange={(e) =>
-                                                setFormData({
-                                                    ...formData,
-                                                    andreAmount: e.target.value,
-                                                })
-                                            }
-                                            className="w-full p-2 border rounded"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium">
-                                            Rita Amount
-                                        </label>
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.ritaAmount}
-                                            onChange={(e) =>
-                                                setFormData({
-                                                    ...formData,
-                                                    ritaAmount: e.target.value,
-                                                })
-                                            }
-                                            className="w-full p-2 border rounded"
-                                            required
-                                        />
-                                    </div>
-                                </div>
-                            )}
-
-                            <Button type="submit" className="w-full">
+                    </Link>
+                    <Dialog
+                        open={showAddDialog}
+                        onOpenChange={setShowAddDialog}
+                    >
+                        <DialogTrigger asChild>
+                            <Button>
+                                <Plus className="mr-2 h-4 w-4" />
                                 Add Expense
                             </Button>
-                        </form>
-                    </DialogContent>
-                </Dialog>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                            <DialogHeader>
+                                <DialogTitle>Add New Expense</DialogTitle>
+                                <DialogDescription>
+                                    Create a new expense entry
+                                </DialogDescription>
+                            </DialogHeader>
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div>
+                                    <Label>Date</Label>
+                                    <Input
+                                        type="date"
+                                        value={formData.date}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                date: e.target.value,
+                                            })
+                                        }
+                                        required
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label>Description</Label>
+                                    <Input
+                                        type="text"
+                                        value={formData.description}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                description: e.target.value,
+                                            })
+                                        }
+                                        required
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label>Category</Label>
+                                    <Select
+                                        value={formData.categoryId}
+                                        onValueChange={(value) =>
+                                            setFormData({
+                                                ...formData,
+                                                categoryId: value,
+                                            })
+                                        }
+                                        required
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select category" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {categories.map((cat) => (
+                                                <SelectItem
+                                                    key={cat.id}
+                                                    value={cat.id}
+                                                >
+                                                    {cat.icon} {cat.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div>
+                                    <Label>Amount (EUR)</Label>
+                                    <Input
+                                        type="number"
+                                        step="0.01"
+                                        value={formData.amount}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                amount: e.target.value,
+                                            })
+                                        }
+                                        required
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label>Paid By</Label>
+                                    <Select
+                                        value={formData.paidById}
+                                        onValueChange={(value) =>
+                                            setFormData({
+                                                ...formData,
+                                                paidById: value,
+                                            })
+                                        }
+                                        required
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select user" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {activeUsers.map((user) => (
+                                                <SelectItem
+                                                    key={user.id}
+                                                    value={user.id}
+                                                >
+                                                    {user.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div>
+                                    <Label>Type</Label>
+                                    <Select
+                                        value={formData.type}
+                                        onValueChange={(value) =>
+                                            setFormData({
+                                                ...formData,
+                                                type: value,
+                                            })
+                                        }
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="shared">
+                                                Shared
+                                            </SelectItem>
+                                            <SelectItem value="personal">
+                                                Personal
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                {formData.type === "shared" && (
+                                    <>
+                                        <div>
+                                            <Label>Split Type</Label>
+                                            <Select
+                                                value={formData.splitType}
+                                                onValueChange={(value) =>
+                                                    setFormData({
+                                                        ...formData,
+                                                        splitType: value as
+                                                            | "equal"
+                                                            | "ratio"
+                                                            | "custom",
+                                                    })
+                                                }
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="equal">
+                                                        Equal Split
+                                                    </SelectItem>
+                                                    <SelectItem value="ratio">
+                                                        By Ratio
+                                                    </SelectItem>
+                                                    <SelectItem value="custom">
+                                                        Custom
+                                                    </SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div>
+                                            <Label className="block mb-2">
+                                                Splits
+                                            </Label>
+                                            <CustomSplitsInput
+                                                users={activeUsers}
+                                                totalAmount={
+                                                    parseFloat(
+                                                        formData.amount,
+                                                    ) || 0
+                                                }
+                                                splits={customSplits}
+                                                onSplitsChange={setCustomSplits}
+                                                splitType={formData.splitType}
+                                            />
+                                        </div>
+                                    </>
+                                )}
+
+                                <Button type="submit" className="w-full">
+                                    Add Expense
+                                </Button>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                </div>
             </div>
 
-            <div className="mb-6 flex flex-wrap gap-4">
-                <div className="flex-1 min-w-[200px]">
-                    <label className="text-sm font-medium mb-2 block">
-                        Filter by Month
-                    </label>
-                    <select
-                        value={selectedMonth}
-                        onChange={(e) => setSelectedMonth(e.target.value)}
-                        className="w-full p-2 border rounded-md bg-background"
-                    >
-                        <option value="all">All Months</option>
-                        {availableMonths.map((month) => (
-                            <option key={month} value={month}>
-                                {getMonthLabel(month)}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className="flex-1 min-w-[200px]">
-                    <label className="text-sm font-medium mb-2 block">
-                        Filter by Category
-                    </label>
-                    <select
-                        value={selectedCategory}
-                        onChange={(e) => setSelectedCategory(e.target.value)}
-                        className="w-full p-2 border rounded-md bg-background"
-                    >
-                        <option value="all">All Categories</option>
-                        {categories.map((cat) => (
-                            <option key={cat.id} value={cat.id}>
-                                {cat.icon} {cat.name}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-            </div>
-
-            <Tabs defaultValue="transactions" className="space-y-6">
-                <TabsList>
-                    <TabsTrigger value="transactions">Transactions</TabsTrigger>
-                    <TabsTrigger value="summary">Summary</TabsTrigger>
+            <Tabs defaultValue="overview" className="space-y-6">
+                <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="expenses">Expenses</TabsTrigger>
+                    <TabsTrigger value="analytics">Analytics</TabsTrigger>
                     <TabsTrigger value="budget">Budget</TabsTrigger>
-                    <TabsTrigger value="categories">By Category</TabsTrigger>
-                    <TabsTrigger value="monthly">By Month</TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="transactions" className="space-y-4">
-                    <div className="grid gap-4 md:grid-cols-3 mb-6">
+                <TabsContent value="overview" className="space-y-6">
+                    {/* Summary Cards */}
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                         <Card>
-                            <CardHeader className="pb-3">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-medium">
-                                    Andre Total
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-2xl font-bold">
-                                    {formatCurrency(stats.andreTotal)}
-                                </p>
-                            </CardContent>
-                        </Card>
-                        <Card>
-                            <CardHeader className="pb-3">
-                                <CardTitle className="text-sm font-medium">
-                                    Rita Total
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-2xl font-bold">
-                                    {formatCurrency(stats.ritaTotal)}
-                                </p>
-                            </CardContent>
-                        </Card>
-                        <Card>
-                            <CardHeader className="pb-3">
-                                <CardTitle className="text-sm font-medium">
-                                    Total Geral
+                                    Total Expenses
                                 </CardTitle>
                             </CardHeader>
                             <CardContent>
@@ -822,853 +852,748 @@ export default function ExpensesPage() {
                                 </p>
                             </CardContent>
                         </Card>
+
+                        {activeUsers.map((user) => (
+                            <Card key={user.id}>
+                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                    <CardTitle className="text-sm font-medium">
+                                        {user.name} Total
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-2xl font-bold">
+                                        {formatCurrency(
+                                            stats.userTotals[user.id] || 0,
+                                        )}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        {(
+                                            ((stats.userTotals[user.id] || 0) /
+                                                stats.total) *
+                                            100
+                                        ).toFixed(1)}
+                                        % of total
+                                    </p>
+                                </CardContent>
+                            </Card>
+                        ))}
                     </div>
 
+                    {/* Balances */}
                     <Card>
                         <CardHeader>
-                            <CardTitle>All Expenses</CardTitle>
+                            <CardTitle>Balances</CardTitle>
                             <CardDescription>
-                                {filteredExpenses.length} expenses tracked
-                                {(selectedMonth !== "all" ||
-                                    selectedCategory !== "all") &&
-                                    ` (filtered from ${expenses.length} total)`}
+                                Who owes whom for unpaid expenses
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="space-y-2">
+                            <div className="space-y-3">
+                                {(() => {
+                                    // Calculate net balances
+                                    const balances = activeUsers.map(
+                                        (user) => ({
+                                            user,
+                                            balance:
+                                                stats.userBalances[user.id] ||
+                                                0,
+                                        }),
+                                    );
+
+                                    // Find who owes whom
+                                    const debtor = balances.find(
+                                        (b) => b.balance < 0,
+                                    );
+                                    const creditor = balances.find(
+                                        (b) => b.balance > 0,
+                                    );
+
+                                    if (
+                                        !debtor ||
+                                        !creditor ||
+                                        debtor.balance === 0
+                                    ) {
+                                        return (
+                                            <div className="p-3 bg-muted/50 rounded text-center text-muted-foreground">
+                                                All settled up! 🎉
+                                            </div>
+                                        );
+                                    }
+
+                                    const amount = Math.abs(debtor.balance);
+
+                                    return (
+                                        <div className="p-4 bg-muted/50 rounded">
+                                            <div className="text-center">
+                                                <span className="font-semibold text-red-600">
+                                                    {debtor.user.name}
+                                                </span>
+                                                <span className="mx-2 text-muted-foreground">
+                                                    owes
+                                                </span>
+                                                <span className="font-semibold text-green-600">
+                                                    {creditor.user.name}
+                                                </span>
+                                            </div>
+                                            <div className="text-center mt-2 text-2xl font-bold">
+                                                {formatCurrency(amount)}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Spending by User */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Spending Distribution</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4">
+                                {activeUsers.map((user) => {
+                                    const userTotal =
+                                        stats.userTotals[user.id] || 0;
+                                    const percentage =
+                                        stats.total > 0
+                                            ? (userTotal / stats.total) * 100
+                                            : 0;
+                                    return (
+                                        <div
+                                            key={user.id}
+                                            className="space-y-2"
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-sm font-medium">
+                                                    {user.name}
+                                                </span>
+                                                <span className="text-sm text-muted-foreground">
+                                                    {percentage.toFixed(0)}%
+                                                </span>
+                                            </div>
+                                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                                <div
+                                                    className="h-full bg-primary transition-all"
+                                                    style={{
+                                                        width: `${percentage}%`,
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="expenses" className="space-y-6">
+                    {/* Filters */}
+                    <div className="flex gap-4 flex-wrap">
+                        <div>
+                            <Label className="block mb-2">Year</Label>
+                            <Select
+                                value={selectedYear}
+                                onValueChange={(value) => {
+                                    setSelectedYear(value);
+                                    setSelectedMonth("all");
+                                }}
+                            >
+                                <SelectTrigger className="w-45">
+                                    <SelectValue placeholder="All Years" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">
+                                        All Years
+                                    </SelectItem>
+                                    {availableYears.map((year) => (
+                                        <SelectItem key={year} value={year}>
+                                            {year}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div>
+                            <Label className="block mb-2">Month</Label>
+                            <Select
+                                value={selectedMonth}
+                                onValueChange={setSelectedMonth}
+                            >
+                                <SelectTrigger className="w-45">
+                                    <SelectValue placeholder="All Months" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">
+                                        All Months
+                                    </SelectItem>
+                                    {filteredAvailableMonths.map((month) => (
+                                        <SelectItem key={month} value={month}>
+                                            {getMonthLabel(month)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div>
+                            <Label className="block mb-2">Category</Label>
+                            <Select
+                                value={selectedCategory}
+                                onValueChange={setSelectedCategory}
+                            >
+                                <SelectTrigger className="w-45">
+                                    <SelectValue placeholder="All Categories" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">
+                                        All Categories
+                                    </SelectItem>
+                                    {categories.map((cat) => (
+                                        <SelectItem key={cat.id} value={cat.id}>
+                                            {cat.icon} {cat.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+
+                    {/* Expenses List */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>
+                                Expenses ({filteredExpenses.length})
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4">
                                 {filteredExpenses.map((expense) => (
                                     <div
                                         key={expense.id}
-                                        className={`flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors border ${
-                                            expense.paid
-                                                ? "bg-green-50 border-green-200"
-                                                : "bg-yellow-50 border-yellow-200"
-                                        }`}
+                                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
                                     >
-                                        <div className="flex items-center gap-3 flex-1">
-                                            <div className="text-2xl">
-                                                {expense.category.icon}
-                                            </div>
-                                            <div className="flex-1">
-                                                <div className="flex items-center gap-2">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-2xl">
+                                                    {expense.category.icon}
+                                                </span>
+                                                <div>
                                                     <p className="font-medium">
                                                         {expense.description}
                                                     </p>
-                                                    <span className="text-xs px-2 py-0.5 rounded bg-muted">
-                                                        {expense.category.name}
-                                                    </span>
-                                                    <span
-                                                        className={`text-xs px-2 py-0.5 rounded ${
-                                                            expense.type ===
-                                                            "shared"
-                                                                ? "bg-blue-100 text-blue-700 border border-blue-300"
-                                                                : "bg-purple-100 text-purple-700 border border-purple-300"
-                                                        }`}
-                                                    >
-                                                        {expense.type ===
-                                                        "shared"
-                                                            ? "Partilhado"
-                                                            : "Pessoal"}
-                                                    </span>
-                                                    {expense.paid ? (
-                                                        <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">
-                                                            Paid ✓
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-xs px-2 py-0.5 rounded bg-yellow-600 text-white">
-                                                            Unpaid
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <p className="text-sm text-muted-foreground">
-                                                    {formatDate(expense.date)} •
-                                                    Paid by{" "}
-                                                    {expense.paidBy.name}
-                                                </p>
-                                                <div className="text-xs text-muted-foreground mt-1">
-                                                    {expense.splits.map(
-                                                        (split) => (
-                                                            <span
-                                                                key={split.id}
-                                                                className="mr-3"
-                                                            >
-                                                                {
-                                                                    split.user
-                                                                        .name
-                                                                }
-                                                                :{" "}
-                                                                {formatCurrency(
-                                                                    split.amount,
-                                                                )}
-                                                            </span>
-                                                        ),
-                                                    )}
+                                                    <p className="text-sm text-muted-foreground">
+                                                        {formatDate(
+                                                            expense.date,
+                                                        )}{" "}
+                                                        •{" "}
+                                                        {expense.category.name}{" "}
+                                                        • Paid by{" "}
+                                                        {expense.paidBy.name}
+                                                    </p>
+                                                    <div className="flex gap-2 mt-1">
+                                                        {expense.splits.map(
+                                                            (split) => (
+                                                                <span
+                                                                    key={
+                                                                        split.id
+                                                                    }
+                                                                    className="text-xs bg-muted px-2 py-1 rounded"
+                                                                >
+                                                                    {
+                                                                        split
+                                                                            .user
+                                                                            .name
+                                                                    }
+                                                                    :{" "}
+                                                                    {formatCurrency(
+                                                                        split.amount,
+                                                                    )}
+                                                                </span>
+                                                            ),
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-3">
+                                        <div className="flex items-center gap-6">
                                             <div className="text-right">
                                                 <p className="font-semibold">
                                                     {formatCurrency(
                                                         expense.amount,
                                                     )}
                                                 </p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {expense.type}
+                                                </p>
                                             </div>
-                                            <input
-                                                type="checkbox"
-                                                checked={expense.paid}
-                                                onChange={() =>
-                                                    togglePaid(
-                                                        expense.id,
-                                                        expense.paid,
-                                                    )
-                                                }
-                                                className="w-5 h-5 cursor-pointer"
-                                                title={
-                                                    expense.paid
-                                                        ? "Mark as unpaid"
-                                                        : "Mark as paid"
-                                                }
-                                            />
+                                            <div className="flex flex-col items-center gap-1">
+                                                <Label className="text-xs text-muted-foreground">
+                                                    Paid
+                                                </Label>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={expense.paid}
+                                                    onChange={() =>
+                                                        togglePaid(
+                                                            expense.id,
+                                                            expense.paid,
+                                                        )
+                                                    }
+                                                    className="w-5 h-5 rounded border-gray-300 cursor-pointer"
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
+
+                                {filteredExpenses.length === 0 && (
+                                    <p className="text-center text-muted-foreground py-8">
+                                        No expenses found
+                                    </p>
+                                )}
                             </div>
                         </CardContent>
                     </Card>
                 </TabsContent>
 
-                <TabsContent value="summary" className="space-y-4">
-                    <div className="grid gap-6 md:grid-cols-2">
+                <TabsContent value="analytics" className="space-y-6">
+                    {expenses.length === 0 ? (
                         <Card>
                             <CardHeader>
-                                <CardTitle>Ratio</CardTitle>
+                                <CardTitle>Analytics</CardTitle>
                                 <CardDescription>
-                                    Spending distribution
+                                    No data available
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <div className="space-y-4">
-                                    <div>
-                                        <div className="flex justify-between mb-2">
-                                            <span className="text-sm font-medium">
-                                                Andre Ribeiro
-                                            </span>
-                                            <span className="text-sm">
-                                                {(
-                                                    (stats.andreTotal /
-                                                        stats.total) *
-                                                    100
-                                                ).toFixed(0)}
-                                                %
-                                            </span>
-                                        </div>
-                                        <div className="w-full bg-muted rounded-full h-2">
-                                            <div
-                                                className="bg-blue-500 h-2 rounded-full"
-                                                style={{
-                                                    width: `${(stats.andreTotal / stats.total) * 100}%`,
-                                                }}
-                                            ></div>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div className="flex justify-between mb-2">
-                                            <span className="text-sm font-medium">
-                                                Rita Pereira
-                                            </span>
-                                            <span className="text-sm">
-                                                {(
-                                                    (stats.ritaTotal /
-                                                        stats.total) *
-                                                    100
-                                                ).toFixed(0)}
-                                                %
-                                            </span>
-                                        </div>
-                                        <div className="w-full bg-muted rounded-full h-2">
-                                            <div
-                                                className="bg-pink-500 h-2 rounded-full"
-                                                style={{
-                                                    width: `${(stats.ritaTotal / stats.total) * 100}%`,
-                                                }}
-                                            ></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Balance</CardTitle>
-                                <CardDescription>
-                                    Outstanding debts (unpaid shared expenses
-                                    only)
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="space-y-4">
-                                    <Separator />
-                                    {stats.andreOwes === 0 &&
-                                    stats.ritaOwes === 0 ? (
-                                        <div className="text-center py-4 bg-green-50 rounded-lg border border-green-200">
-                                            <p className="text-lg font-semibold text-green-700">
-                                                All settled! ✅
-                                            </p>
-                                            <p className="text-sm text-green-600 mt-1">
-                                                No outstanding debts
-                                            </p>
-                                        </div>
-                                    ) : stats.ritaOwes > 0 ? (
-                                        <div className="text-center py-4 bg-muted/50 rounded-lg">
-                                            <p className="text-sm text-muted-foreground mb-2">
-                                                Rita owes Andre
-                                            </p>
-                                            <p className="text-3xl font-bold text-primary">
-                                                {formatCurrency(stats.ritaOwes)}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground mt-2">
-                                                From unpaid shared expenses
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        <div className="text-center py-4 bg-muted/50 rounded-lg">
-                                            <p className="text-sm text-muted-foreground mb-2">
-                                                Andre owes Rita
-                                            </p>
-                                            <p className="text-3xl font-bold text-primary">
-                                                {formatCurrency(
-                                                    stats.andreOwes,
-                                                )}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground mt-2">
-                                                From unpaid shared expenses
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </div>
-                </TabsContent>
-
-                <TabsContent value="budget" className="space-y-6">
-                    {budgetMonth ? (
-                        <>
-                            <div className="flex items-center gap-4 mb-6">
-                                <label className="text-sm font-semibold">
-                                    Year:
-                                </label>
-                                <select
-                                    value={budgetYear}
-                                    onChange={(e) =>
-                                        setBudgetYear(e.target.value)
-                                    }
-                                    className="p-2 border rounded-md text-lg font-medium"
-                                >
-                                    {availableYears.map((year) => (
-                                        <option key={year} value={year}>
-                                            {year}
-                                        </option>
-                                    ))}
-                                </select>
-
-                                <label className="text-sm font-semibold">
-                                    Month:
-                                </label>
-                                <select
-                                    value={budgetMonthNum}
-                                    onChange={(e) =>
-                                        setBudgetMonthNum(e.target.value)
-                                    }
-                                    className="p-2 border rounded-md text-lg font-medium"
-                                >
-                                    {monthNames.map((name, idx) => (
-                                        <option
-                                            key={idx + 1}
-                                            value={String(idx + 1).padStart(
-                                                2,
-                                                "0",
-                                            )}
-                                        >
-                                            {name}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="grid gap-6 md:grid-cols-2">
-                                {/* Rita's Budget */}
-                                <Card className="overflow-hidden p-0">
-                                    <CardHeader className="bg-pink-50 pb-6 px-6 pt-6">
-                                        <CardTitle className="text-pink-900 text-xl">
-                                            Rita Pereira
-                                        </CardTitle>
-                                        <CardDescription className="text-base">
-                                            Monthly budget for{" "}
-                                            {getMonthLabel(budgetMonth)}
-                                        </CardDescription>
-                                    </CardHeader>
-                                    <CardContent className="pt-6 px-6 pb-6">
-                                        <div className="space-y-4">
-                                            <div>
-                                                <h4 className="font-semibold text-sm text-gray-600 mb-3">
-                                                    💰 Income
-                                                </h4>
-                                                {incomeTypes.map((type) => {
-                                                    const amount =
-                                                        getIncomeAmount(
-                                                            "rita",
-                                                            type,
-                                                        );
-                                                    if (amount === 0)
-                                                        return null;
-                                                    return (
-                                                        <div
-                                                            key={type}
-                                                            className="flex justify-between items-center py-2 border-b"
-                                                        >
-                                                            <span className="text-sm">
-                                                                {type}
-                                                            </span>
-                                                            <span className="font-semibold">
-                                                                {formatCurrency(
-                                                                    amount,
-                                                                )}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                                {incomeTypes.every(
-                                                    (type) =>
-                                                        getIncomeAmount(
-                                                            "rita",
-                                                            type,
-                                                        ) === 0,
-                                                ) && (
-                                                    <p className="text-sm text-gray-500 italic py-2">
-                                                        No tracked income. Track
-                                                        deposits on Transactions
-                                                        tab.
-                                                    </p>
-                                                )}
-                                                <div className="flex justify-between items-center py-3 font-bold text-green-700 bg-green-50 px-2 rounded mt-2">
-                                                    <span>Total Income</span>
-                                                    <span>
-                                                        {formatCurrency(
-                                                            incomeTypes.reduce(
-                                                                (sum, type) =>
-                                                                    sum +
-                                                                    getIncomeAmount(
-                                                                        "rita",
-                                                                        type,
-                                                                    ),
-                                                                0,
-                                                            ),
-                                                        )}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <h4 className="font-semibold text-sm text-gray-600 mb-3">
-                                                    💸 Expenses
-                                                </h4>
-                                                <div className="flex justify-between items-center py-3 font-bold text-red-700 bg-red-50 px-2 rounded">
-                                                    <span>Total Expenses</span>
-                                                    <span>
-                                                        {formatCurrency(
-                                                            stats.ritaBudgetTotal,
-                                                        )}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            <div
-                                                className={`p-4 rounded-lg text-center ${
-                                                    incomeTypes.reduce(
-                                                        (sum, type) =>
-                                                            sum +
-                                                            getIncomeAmount(
-                                                                "rita",
-                                                                type,
-                                                            ),
-                                                        0,
-                                                    ) -
-                                                        stats.ritaBudgetTotal >=
-                                                    0
-                                                        ? "bg-green-100 border-2 border-green-300"
-                                                        : "bg-red-100 border-2 border-red-300"
-                                                }`}
-                                            >
-                                                <p className="text-sm font-medium text-gray-600 mb-1">
-                                                    {incomeTypes.reduce(
-                                                        (sum, type) =>
-                                                            sum +
-                                                            getIncomeAmount(
-                                                                "rita",
-                                                                type,
-                                                            ),
-                                                        0,
-                                                    ) -
-                                                        stats.ritaBudgetTotal >=
-                                                    0
-                                                        ? "💚 Saved"
-                                                        : "⚠️ Over Budget"}
-                                                </p>
-                                                <p
-                                                    className={`text-3xl font-bold ${
-                                                        incomeTypes.reduce(
-                                                            (sum, type) =>
-                                                                sum +
-                                                                getIncomeAmount(
-                                                                    "rita",
-                                                                    type,
-                                                                ),
-                                                            0,
-                                                        ) -
-                                                            stats.ritaBudgetTotal >=
-                                                        0
-                                                            ? "text-green-900"
-                                                            : "text-red-900"
-                                                    }`}
-                                                >
-                                                    {formatCurrency(
-                                                        incomeTypes.reduce(
-                                                            (sum, type) =>
-                                                                sum +
-                                                                getIncomeAmount(
-                                                                    "rita",
-                                                                    type,
-                                                                ),
-                                                            0,
-                                                        ) -
-                                                            stats.ritaBudgetTotal,
-                                                    )}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-
-                                {/* André's Budget */}
-                                <Card className="overflow-hidden p-0">
-                                    <CardHeader className="bg-blue-50 pb-6 px-6 pt-6">
-                                        <CardTitle className="text-blue-900 text-xl">
-                                            André Ribeiro
-                                        </CardTitle>
-                                        <CardDescription className="text-base">
-                                            Monthly budget for{" "}
-                                            {getMonthLabel(budgetMonth)}
-                                        </CardDescription>
-                                    </CardHeader>
-                                    <CardContent className="pt-6 px-6 pb-6">
-                                        <div className="space-y-4">
-                                            <div>
-                                                <h4 className="font-semibold text-sm text-gray-600 mb-3">
-                                                    💰 Income
-                                                </h4>
-                                                {incomeTypes.map((type) => {
-                                                    const amount =
-                                                        getIncomeAmount(
-                                                            "andre",
-                                                            type,
-                                                        );
-                                                    if (amount === 0)
-                                                        return null;
-                                                    return (
-                                                        <div
-                                                            key={type}
-                                                            className="flex justify-between items-center py-2 border-b"
-                                                        >
-                                                            <span className="text-sm">
-                                                                {type}
-                                                            </span>
-                                                            <span className="font-semibold">
-                                                                {formatCurrency(
-                                                                    amount,
-                                                                )}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                                {incomeTypes.every(
-                                                    (type) =>
-                                                        getIncomeAmount(
-                                                            "andre",
-                                                            type,
-                                                        ) === 0,
-                                                ) && (
-                                                    <p className="text-sm text-gray-500 italic py-2">
-                                                        No tracked income. Track
-                                                        deposits on Transactions
-                                                        tab.
-                                                    </p>
-                                                )}
-                                                <div className="flex justify-between items-center py-3 font-bold text-green-700 bg-green-50 px-2 rounded mt-2">
-                                                    <span>Total Income</span>
-                                                    <span>
-                                                        {formatCurrency(
-                                                            incomeTypes.reduce(
-                                                                (sum, type) =>
-                                                                    sum +
-                                                                    getIncomeAmount(
-                                                                        "andre",
-                                                                        type,
-                                                                    ),
-                                                                0,
-                                                            ),
-                                                        )}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <h4 className="font-semibold text-sm text-gray-600 mb-3">
-                                                    💸 Expenses
-                                                </h4>
-                                                <div className="flex justify-between items-center py-3 font-bold text-red-700 bg-red-50 px-2 rounded">
-                                                    <span>Total Expenses</span>
-                                                    <span>
-                                                        {formatCurrency(
-                                                            stats.andreBudgetTotal,
-                                                        )}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            <div
-                                                className={`p-4 rounded-lg text-center ${
-                                                    incomeTypes.reduce(
-                                                        (sum, type) =>
-                                                            sum +
-                                                            getIncomeAmount(
-                                                                "andre",
-                                                                type,
-                                                            ),
-                                                        0,
-                                                    ) -
-                                                        stats.andreBudgetTotal >=
-                                                    0
-                                                        ? "bg-green-100 border-2 border-green-300"
-                                                        : "bg-red-100 border-2 border-red-300"
-                                                }`}
-                                            >
-                                                <p className="text-sm font-medium text-gray-600 mb-1">
-                                                    {incomeTypes.reduce(
-                                                        (sum, type) =>
-                                                            sum +
-                                                            getIncomeAmount(
-                                                                "andre",
-                                                                type,
-                                                            ),
-                                                        0,
-                                                    ) -
-                                                        stats.andreBudgetTotal >=
-                                                    0
-                                                        ? "💚 Saved"
-                                                        : "⚠️ Over Budget"}
-                                                </p>
-                                                <p
-                                                    className={`text-3xl font-bold ${
-                                                        incomeTypes.reduce(
-                                                            (sum, type) =>
-                                                                sum +
-                                                                getIncomeAmount(
-                                                                    "andre",
-                                                                    type,
-                                                                ),
-                                                            0,
-                                                        ) -
-                                                            stats.andreBudgetTotal >=
-                                                        0
-                                                            ? "text-green-900"
-                                                            : "text-red-900"
-                                                    }`}
-                                                >
-                                                    {formatCurrency(
-                                                        incomeTypes.reduce(
-                                                            (sum, type) =>
-                                                                sum +
-                                                                getIncomeAmount(
-                                                                    "andre",
-                                                                    type,
-                                                                ),
-                                                            0,
-                                                        ) -
-                                                            stats.andreBudgetTotal,
-                                                    )}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            </div>
-
-                            <Card className="bg-gray-50">
-                                <CardContent className="pt-6">
-                                    <p className="text-sm text-gray-600 text-center">
-                                        💡 <strong>Tip:</strong> Go to
-                                        Transactions tab → Click on deposits →
-                                        Track as income (Salario, Beneficios, or
-                                        Extras)
-                                    </p>
-                                </CardContent>
-                            </Card>
-                        </>
-                    ) : (
-                        <Card>
-                            <CardContent className="py-12">
-                                <p className="text-center text-gray-500">
-                                    No expenses found. Add some expenses to see
-                                    budget tracking.
+                                <p className="text-muted-foreground">
+                                    Add some expenses to see analytics
+                                    visualizations
                                 </p>
                             </CardContent>
                         </Card>
+                    ) : (
+                        <>
+                            {/* Analytics Filters */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Analytics Filters</CardTitle>
+                                    <CardDescription>
+                                        Filter data by month to see monthly
+                                        performance
+                                    </CardDescription>
+                                    <CardTitle>Filters</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="flex flex-col gap-4">
+                                        <div>
+                                            <Label className="block mb-2">
+                                                Year
+                                            </Label>
+                                            <Select
+                                                value={selectedYear}
+                                                onValueChange={(value) => {
+                                                    setSelectedYear(value);
+                                                    setSelectedMonth("all");
+                                                }}
+                                            >
+                                                <SelectTrigger className="w-full">
+                                                    <SelectValue placeholder="All Years" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="all">
+                                                        All Years
+                                                    </SelectItem>
+                                                    {availableYears.map(
+                                                        (year) => (
+                                                            <SelectItem
+                                                                key={year}
+                                                                value={year}
+                                                            >
+                                                                {year}
+                                                            </SelectItem>
+                                                        ),
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div>
+                                            <Label className="block mb-2">
+                                                Month
+                                            </Label>
+                                            <Select
+                                                value={selectedMonth}
+                                                onValueChange={setSelectedMonth}
+                                            >
+                                                <SelectTrigger className="w-full">
+                                                    <SelectValue placeholder="All Months" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="all">
+                                                        All Months
+                                                    </SelectItem>
+                                                    {filteredAvailableMonths.map(
+                                                        (month) => (
+                                                            <SelectItem
+                                                                key={month}
+                                                                value={month}
+                                                            >
+                                                                {getMonthLabel(
+                                                                    month,
+                                                                )}
+                                                            </SelectItem>
+                                                        ),
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div>
+                                            <Label className="block mb-2">
+                                                Category
+                                            </Label>
+                                            <Select
+                                                value={selectedCategory}
+                                                onValueChange={
+                                                    setSelectedCategory
+                                                }
+                                            >
+                                                <SelectTrigger className="w-full">
+                                                    <SelectValue placeholder="All Categories" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="all">
+                                                        All Categories
+                                                    </SelectItem>
+                                                    {categories.map((cat) => (
+                                                        <SelectItem
+                                                            key={cat.id}
+                                                            value={cat.id}
+                                                        >
+                                                            {cat.icon}{" "}
+                                                            {cat.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        {(selectedMonth !== "all" ||
+                                            selectedYear !== "all" ||
+                                            selectedCategory !== "all") && (
+                                            <div className="flex items-end">
+                                                <Button
+                                                    variant="outline"
+                                                    onClick={() => {
+                                                        setSelectedYear("all");
+                                                        setSelectedMonth("all");
+                                                        setSelectedCategory(
+                                                            "all",
+                                                        );
+                                                    }}
+                                                >
+                                                    Clear Filters
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+
+                            <SummaryCards
+                                incomes={incomes.filter((inc) => {
+                                    const incomeMonthKey = getMonthKey(
+                                        inc.date,
+                                    );
+                                    const [incomeYear] =
+                                        incomeMonthKey.split("-");
+
+                                    const yearMatch =
+                                        selectedYear === "all" ||
+                                        incomeYear === selectedYear;
+                                    const monthMatch =
+                                        selectedMonth === "all" ||
+                                        incomeMonthKey === selectedMonth;
+
+                                    return yearMatch && monthMatch;
+                                })}
+                                expenses={filteredExpenses}
+                                users={activeUsers}
+                            />
+                            <CategoryPieCharts
+                                categoryTotals={stats.categoryTotals}
+                                formatCurrency={formatCurrency}
+                                userTotals={stats.userTotals}
+                                users={activeUsers}
+                            />
+                            <MonthlyOverviewChart
+                                expenses={expenses}
+                                users={activeUsers}
+                            />
+                            <SpendingTrendChart
+                                expenses={expenses}
+                                users={activeUsers}
+                            />
+                            <CategoryComparisonChart
+                                categoryTotals={stats.categoryTotals}
+                                formatCurrency={formatCurrency}
+                                users={activeUsers}
+                            />
+                            <ExpenseTypeCards
+                                expenses={expenses}
+                                users={activeUsers}
+                            />
+                        </>
                     )}
                 </TabsContent>
 
-                <TabsContent value="categories" className="space-y-4">
+                <TabsContent value="budget" className="space-y-6">
+                    {/* Budget Month Selector */}
                     <Card>
                         <CardHeader>
-                            <CardTitle>Gastos Pessoais - By Category</CardTitle>
-                            <CardDescription>
-                                Breakdown by spending category
-                            </CardDescription>
+                            <CardTitle>Select Budget Month</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex gap-4">
+                                <div>
+                                    <Label className="block mb-2">Year</Label>
+                                    <Select
+                                        value={budgetYear}
+                                        onValueChange={setBudgetYear}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select Year" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {availableYears.map((year) => (
+                                                <SelectItem
+                                                    key={year}
+                                                    value={year}
+                                                >
+                                                    {year}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <Label className="block mb-2">Month</Label>
+                                    <Select
+                                        value={budgetMonthNum}
+                                        onValueChange={setBudgetMonthNum}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select Month" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {monthNames.map((name, idx) => (
+                                                <SelectItem
+                                                    key={idx}
+                                                    value={String(
+                                                        idx + 1,
+                                                    ).padStart(2, "0")}
+                                                >
+                                                    {name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Income Table */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>
+                                Income for {getMonthLabel(budgetMonth)}
+                            </CardTitle>
                         </CardHeader>
                         <CardContent>
                             <div className="overflow-x-auto">
-                                <table className="w-full border-collapse">
+                                <table className="w-full">
                                     <thead>
-                                        <tr className="border-b-2 border-gray-300">
-                                            <th className="text-left p-3 font-semibold bg-gray-50">
-                                                Categoria
+                                        <tr className="border-b">
+                                            <th className="text-left p-2">
+                                                Type
                                             </th>
-                                            <th className="text-right p-3 font-semibold bg-blue-50">
-                                                Andre Ribeiro
-                                            </th>
-                                            <th className="text-right p-3 font-semibold bg-pink-50">
-                                                Rita Pereira
-                                            </th>
-                                            <th className="text-right p-3 font-semibold bg-gray-100">
-                                                Total geral
-                                            </th>
+                                            {activeUsers.map((user) => (
+                                                <th
+                                                    key={user.id}
+                                                    className="text-left p-2"
+                                                >
+                                                    {user.name}
+                                                </th>
+                                            ))}
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {Object.entries(stats.categoryTotals)
-                                            .sort(
-                                                ([, a], [, b]) =>
-                                                    b.andre +
-                                                    b.rita -
-                                                    (a.andre + a.rita),
-                                            )
-                                            .map(([categoryName, totals]) => {
+                                        {incomeTypes.map((type) => (
+                                            <tr key={type} className="border-b">
+                                                <td className="p-2 font-medium">
+                                                    {type}
+                                                </td>
+                                                {activeUsers.map((user) => (
+                                                    <td
+                                                        key={user.id}
+                                                        className="p-2"
+                                                    >
+                                                        <Input
+                                                            type="number"
+                                                            step="0.01"
+                                                            value={
+                                                                editingIncome[
+                                                                    `${user.id}-${type}`
+                                                                ] ??
+                                                                getIncomeAmount(
+                                                                    user.id,
+                                                                    type,
+                                                                )
+                                                            }
+                                                            onChange={(e) => {
+                                                                setEditingIncome(
+                                                                    {
+                                                                        ...editingIncome,
+                                                                        [`${user.id}-${type}`]:
+                                                                            e
+                                                                                .target
+                                                                                .value,
+                                                                    },
+                                                                );
+                                                            }}
+                                                            onBlur={(e) => {
+                                                                updateIncome(
+                                                                    user.id,
+                                                                    type,
+                                                                    e.target
+                                                                        .value,
+                                                                );
+                                                                const newEditing =
+                                                                    {
+                                                                        ...editingIncome,
+                                                                    };
+                                                                delete newEditing[
+                                                                    `${user.id}-${type}`
+                                                                ];
+                                                                setEditingIncome(
+                                                                    newEditing,
+                                                                );
+                                                            }}
+                                                        />
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                        <tr className="font-bold">
+                                            <td className="p-2">Total</td>
+                                            {activeUsers.map((user) => {
                                                 const total =
-                                                    totals.andre + totals.rita;
-                                                const category =
-                                                    categories.find(
-                                                        (c) =>
-                                                            c.name ===
-                                                            categoryName,
+                                                    incomeTypes.reduce(
+                                                        (sum, type) =>
+                                                            sum +
+                                                            getIncomeAmount(
+                                                                user.id,
+                                                                type,
+                                                            ),
+                                                        0,
                                                     );
                                                 return (
-                                                    <tr
-                                                        key={categoryName}
-                                                        className="border-b border-gray-200 hover:bg-gray-50 transition-colors"
+                                                    <td
+                                                        key={user.id}
+                                                        className="p-2"
                                                     >
-                                                        <td className="p-3">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-xl">
-                                                                    {
-                                                                        category?.icon
-                                                                    }
-                                                                </span>
-                                                                <span className="font-medium">
-                                                                    {
-                                                                        categoryName
-                                                                    }
-                                                                </span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="text-right p-3 bg-blue-50/30">
-                                                            <span className="font-semibold text-blue-900">
-                                                                {formatCurrency(
-                                                                    totals.andre,
-                                                                )}
-                                                            </span>
-                                                        </td>
-                                                        <td className="text-right p-3 bg-pink-50/30">
-                                                            <span className="font-semibold text-pink-900">
-                                                                {formatCurrency(
-                                                                    totals.rita,
-                                                                )}
-                                                            </span>
-                                                        </td>
-                                                        <td className="text-right p-3 bg-gray-100/50">
-                                                            <span className="font-bold">
-                                                                {formatCurrency(
-                                                                    total,
-                                                                )}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
+                                                        {formatCurrency(total)}
+                                                    </td>
                                                 );
                                             })}
-                                        <tr className="border-t-2 border-gray-300 font-bold bg-gray-50">
-                                            <td className="p-3">Total geral</td>
-                                            <td className="text-right p-3 bg-blue-100/50 text-blue-900">
-                                                {formatCurrency(
-                                                    stats.andreTotal,
-                                                )}
-                                            </td>
-                                            <td className="text-right p-3 bg-pink-100/50 text-pink-900">
-                                                {formatCurrency(
-                                                    stats.ritaTotal,
-                                                )}
-                                            </td>
-                                            <td className="text-right p-3 bg-gray-200 text-lg">
-                                                {formatCurrency(stats.total)}
-                                            </td>
                                         </tr>
                                     </tbody>
                                 </table>
                             </div>
                         </CardContent>
                     </Card>
-                </TabsContent>
 
-                <TabsContent value="monthly" className="space-y-4">
+                    {/* Budget Summary */}
                     <Card>
                         <CardHeader>
-                            <CardTitle>Gastos Pessoais - By Month</CardTitle>
-                            <CardDescription>
-                                Monthly breakdown with category details
-                            </CardDescription>
+                            <CardTitle>Budget Summary</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className="space-y-6">
-                                {Object.entries(stats.monthTotals)
-                                    .sort(([a], [b]) => b.localeCompare(a))
-                                    .map(([monthKey, monthData]) => {
-                                        const monthTotal =
-                                            monthData.andre + monthData.rita;
-                                        return (
-                                            <div
-                                                key={monthKey}
-                                                className="p-4 border rounded-lg space-y-4"
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <h3 className="font-bold text-lg">
-                                                        {getMonthLabel(
-                                                            monthKey,
-                                                        )}
-                                                    </h3>
-                                                    <span className="font-bold text-lg">
+                            <div className="space-y-4">
+                                {activeUsers.map((user) => {
+                                    const income = incomeTypes.reduce(
+                                        (sum, type) =>
+                                            sum +
+                                            getIncomeAmount(user.id, type),
+                                        0,
+                                    );
+                                    const expenses =
+                                        stats.userBudgetTotals[user.id] || 0;
+                                    const savings = income - expenses;
+                                    const savingsRate =
+                                        income > 0
+                                            ? (savings / income) * 100
+                                            : 0;
+
+                                    return (
+                                        <div
+                                            key={user.id}
+                                            className="p-4 border rounded-lg"
+                                        >
+                                            <h3 className="font-semibold mb-3">
+                                                {user.name}
+                                            </h3>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Income
+                                                    </p>
+                                                    <p className="text-lg font-semibold text-green-600">
+                                                        {formatCurrency(income)}
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Expenses
+                                                    </p>
+                                                    <p className="text-lg font-semibold text-red-600">
                                                         {formatCurrency(
-                                                            monthTotal,
+                                                            expenses,
                                                         )}
-                                                    </span>
+                                                    </p>
                                                 </div>
-
-                                                <div className="grid grid-cols-2 gap-4 p-3 bg-muted/50 rounded">
-                                                    <div>
-                                                        <p className="text-sm text-muted-foreground">
-                                                            Andre Ribeiro
-                                                        </p>
-                                                        <p className="font-semibold text-lg">
-                                                            {formatCurrency(
-                                                                monthData.andre,
-                                                            )}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-sm text-muted-foreground">
-                                                            Rita Pereira
-                                                        </p>
-                                                        <p className="font-semibold text-lg">
-                                                            {formatCurrency(
-                                                                monthData.rita,
-                                                            )}
-                                                        </p>
-                                                    </div>
-                                                </div>
-
-                                                <div className="space-y-2">
-                                                    <h4 className="font-semibold text-sm text-muted-foreground">
-                                                        Category Breakdown
-                                                    </h4>
-                                                    {Object.entries(
-                                                        monthData.byCategory,
-                                                    )
-                                                        .sort(
-                                                            ([, a], [, b]) =>
-                                                                b.andre +
-                                                                b.rita -
-                                                                (a.andre +
-                                                                    a.rita),
-                                                        )
-                                                        .map(
-                                                            ([
-                                                                categoryName,
-                                                                catTotals,
-                                                            ]) => {
-                                                                const catTotal =
-                                                                    catTotals.andre +
-                                                                    catTotals.rita;
-                                                                const category =
-                                                                    categories.find(
-                                                                        (c) =>
-                                                                            c.name ===
-                                                                            categoryName,
-                                                                    );
-                                                                return (
-                                                                    <div
-                                                                        key={
-                                                                            categoryName
-                                                                        }
-                                                                        className="flex items-center justify-between p-2 rounded hover:bg-muted/50"
-                                                                    >
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-lg">
-                                                                                {
-                                                                                    category?.icon
-                                                                                }
-                                                                            </span>
-                                                                            <span className="text-sm font-medium">
-                                                                                {
-                                                                                    categoryName
-                                                                                }
-                                                                            </span>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-4 text-sm">
-                                                                            <span className="text-muted-foreground">
-                                                                                A:{" "}
-                                                                                {formatCurrency(
-                                                                                    catTotals.andre,
-                                                                                )}
-                                                                            </span>
-                                                                            <span className="text-muted-foreground">
-                                                                                R:{" "}
-                                                                                {formatCurrency(
-                                                                                    catTotals.rita,
-                                                                                )}
-                                                                            </span>
-                                                                            <span className="font-semibold min-w-[80px] text-right">
-                                                                                {formatCurrency(
-                                                                                    catTotal,
-                                                                                )}
-                                                                            </span>
-                                                                        </div>
-                                                                    </div>
-                                                                );
-                                                            },
+                                                <div>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Savings
+                                                    </p>
+                                                    <p
+                                                        className={`text-lg font-semibold ${savings >= 0 ? "text-green-600" : "text-red-600"}`}
+                                                    >
+                                                        {formatCurrency(
+                                                            savings,
                                                         )}
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Savings Rate
+                                                    </p>
+                                                    <p
+                                                        className={`text-lg font-semibold ${savingsRate >= 20 ? "text-green-600" : "text-orange-600"}`}
+                                                    >
+                                                        {savingsRate.toFixed(1)}
+                                                        %
+                                                    </p>
                                                 </div>
                                             </div>
-                                        );
-                                    })}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </CardContent>
                     </Card>

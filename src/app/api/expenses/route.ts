@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
-        const userId = searchParams.get("userId");
         const startDate = searchParams.get("startDate");
         const endDate = searchParams.get("endDate");
 
-        const where: any = {};
+        const where: Prisma.ExpenseWhereInput = {};
 
         if (startDate && endDate) {
             where.date = {
@@ -46,9 +46,11 @@ export async function GET(request: NextRequest) {
             expenses,
             count: expenses.length,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error fetching expenses:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
@@ -78,11 +80,17 @@ export async function POST(request: NextRequest) {
                 type: type || "shared",
                 paid: false,
                 splits: {
-                    create: splits.map((split: any) => ({
-                        userId: split.userId,
-                        amount: parseFloat(split.amount),
-                        paid: split.paid || false,
-                    })),
+                    create: splits.map(
+                        (split: {
+                            userId: string;
+                            amount: number;
+                            paid?: boolean;
+                        }) => ({
+                            userId: split.userId,
+                            amount: parseFloat(split.amount.toString()),
+                            paid: split.paid || false,
+                        }),
+                    ),
                 },
             },
             include: {
@@ -111,9 +119,11 @@ export async function POST(request: NextRequest) {
             success: true,
             expense,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error creating expense:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
@@ -123,7 +133,7 @@ export async function PUT(request: NextRequest) {
         const { id, paid } = body;
 
         // Update expense and all its splits to the same paid status
-        const expense = await prisma.expense.update({
+        await prisma.expense.update({
             where: { id },
             data: { paid },
             include: {
@@ -161,9 +171,11 @@ export async function PUT(request: NextRequest) {
             success: true,
             expense: updatedExpense,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error updating expense:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
@@ -187,8 +199,10 @@ export async function DELETE(request: NextRequest) {
             success: true,
             message: "Expense deleted",
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error deleting expense:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

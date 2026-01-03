@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { plaidClient } from "@/lib/plaid";
 import { prisma } from "@/lib/db";
+import { CountryCode } from "plaid";
 
 export async function POST(request: NextRequest) {
     try {
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
                 const institutionResponse =
                     await plaidClient.institutionsGetById({
                         institution_id: institutionId,
-                        country_codes: ["IE", "GB"],
+                        country_codes: [CountryCode.Ie, CountryCode.Gb],
                     });
                 institutionName = institutionResponse.data.institution.name;
             } catch (error) {
@@ -89,10 +90,14 @@ export async function POST(request: NextRequest) {
             institutionName: institutionName,
             accountCount: accounts.length,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error exchanging public token:", error);
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        const responseData = (error as { response?: { data?: unknown } })
+            .response?.data;
         return NextResponse.json(
-            { error: error.response?.data || error.message },
+            { error: responseData || message },
             { status: 500 },
         );
     }

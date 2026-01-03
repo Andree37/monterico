@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
     try {
         // Get the first (and should be only) settings record
         let settings = await prisma.settings.findFirst();
@@ -10,10 +10,9 @@ export async function GET(request: NextRequest) {
         if (!settings) {
             settings = await prisma.settings.create({
                 data: {
-                    defaultAndreRatio: 0.5,
-                    defaultRitaRatio: 0.5,
-                    defaultPaidBy: "andre",
+                    defaultPaidBy: null,
                     defaultType: "shared",
+                    defaultSplitType: "equal",
                 },
             });
         }
@@ -22,21 +21,18 @@ export async function GET(request: NextRequest) {
             success: true,
             settings,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error fetching settings:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const {
-            defaultAndreRatio,
-            defaultRitaRatio,
-            defaultPaidBy,
-            defaultType,
-        } = body;
+        const { defaultPaidBy, defaultType, defaultSplitType } = body;
 
         // Get existing settings or create if none exist
         let settings = await prisma.settings.findFirst();
@@ -46,26 +42,22 @@ export async function POST(request: NextRequest) {
             settings = await prisma.settings.update({
                 where: { id: settings.id },
                 data: {
-                    defaultAndreRatio:
-                        defaultAndreRatio !== undefined
-                            ? parseFloat(defaultAndreRatio)
-                            : settings.defaultAndreRatio,
-                    defaultRitaRatio:
-                        defaultRitaRatio !== undefined
-                            ? parseFloat(defaultRitaRatio)
-                            : settings.defaultRitaRatio,
-                    defaultPaidBy: defaultPaidBy || settings.defaultPaidBy,
+                    defaultPaidBy:
+                        defaultPaidBy !== undefined
+                            ? defaultPaidBy
+                            : settings.defaultPaidBy,
                     defaultType: defaultType || settings.defaultType,
+                    defaultSplitType:
+                        defaultSplitType || settings.defaultSplitType,
                 },
             });
         } else {
             // Create new settings
             settings = await prisma.settings.create({
                 data: {
-                    defaultAndreRatio: parseFloat(defaultAndreRatio) || 0.5,
-                    defaultRitaRatio: parseFloat(defaultRitaRatio) || 0.5,
-                    defaultPaidBy: defaultPaidBy || "andre",
+                    defaultPaidBy: defaultPaidBy || null,
                     defaultType: defaultType || "shared",
+                    defaultSplitType: defaultSplitType || "equal",
                 },
             });
         }
@@ -74,8 +66,10 @@ export async function POST(request: NextRequest) {
             success: true,
             settings,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error saving settings:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

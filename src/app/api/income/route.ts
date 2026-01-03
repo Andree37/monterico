@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
     try {
@@ -9,7 +10,7 @@ export async function GET(request: NextRequest) {
         const endDate = searchParams.get("endDate");
         const month = searchParams.get("month"); // YYYY-MM format
 
-        const where: any = {};
+        const where: Prisma.IncomeWhereInput = {};
 
         if (userId) {
             where.userId = userId;
@@ -60,9 +61,11 @@ export async function GET(request: NextRequest) {
             incomes,
             count: incomes.length,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error fetching incomes:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
@@ -127,9 +130,11 @@ export async function POST(request: NextRequest) {
             success: true,
             income,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error creating/updating income:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
@@ -153,8 +158,10 @@ export async function DELETE(request: NextRequest) {
             success: true,
             message: "Income deleted",
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error deleting income:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

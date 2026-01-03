@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
     try {
         const categories = await prisma.category.findMany({
             orderBy: { name: "asc" },
@@ -12,9 +12,11 @@ export async function GET(request: NextRequest) {
             categories,
             count: categories.length,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error fetching categories:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
 
@@ -36,8 +38,10 @@ export async function POST(request: NextRequest) {
             success: true,
             category,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Error creating category:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

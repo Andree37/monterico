@@ -14,27 +14,63 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
     console.log("Seeding database...");
 
-    const andre = await prisma.user.upsert({
-        where: { id: "andre" },
-        update: {},
-        create: {
+    // Create default users - you can modify this array to add more users
+    const defaultUsers = [
+        {
             id: "andre",
             name: "Andre Ribeiro",
             email: "andre@example.com",
+            ratio: 0.65,
         },
-    });
-
-    const rita = await prisma.user.upsert({
-        where: { id: "rita" },
-        update: {},
-        create: {
+        {
             id: "rita",
             name: "Rita Pereira",
             email: "rita@example.com",
+            ratio: 0.35,
+        },
+    ];
+
+    const users = [];
+    for (const userData of defaultUsers) {
+        const user = await prisma.user.upsert({
+            where: { id: userData.id },
+            update: {},
+            create: {
+                id: userData.id,
+                name: userData.name,
+                email: userData.email,
+            },
+        });
+
+        // Create or update split ratio for the user
+        await prisma.userSplitRatio.upsert({
+            where: { userId: user.id },
+            update: { ratio: userData.ratio, isActive: true },
+            create: {
+                userId: user.id,
+                ratio: userData.ratio,
+                isActive: true,
+            },
+        });
+
+        users.push(user);
+    }
+
+    console.log(`Created ${users.length} users with split ratios`);
+
+    // Create default settings
+    await prisma.settings.upsert({
+        where: { id: "default" },
+        update: {},
+        create: {
+            id: "default",
+            defaultPaidBy: users[0]?.id || null,
+            defaultType: "shared",
+            defaultSplitType: "equal",
         },
     });
 
-    console.log("Created users:", { andre, rita });
+    console.log("Created settings");
 
     const categories = [
         { name: "Coisas de casa", color: "#FF9800", icon: "🏠" },
@@ -61,6 +97,193 @@ async function main() {
     }
 
     console.log("Created categories");
+
+    // Create sample income for the last 6 months for each user
+    const now = new Date();
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push(date);
+    }
+
+    for (const month of months) {
+        for (let i = 0; i < users.length; i++) {
+            const user = users[i];
+            await prisma.income.create({
+                data: {
+                    userId: user.id,
+                    date: month.toISOString(),
+                    description: `Salario - ${month.toLocaleDateString("pt-PT", { month: "long", year: "numeric" })}`,
+                    type: "Salario",
+                    amount: 3000 + i * 500, // Vary income by user
+                    currency: "EUR",
+                },
+            });
+        }
+    }
+
+    console.log("Created sample income");
+
+    // Create sample expenses
+    const comidaCategory = await prisma.category.findFirst({
+        where: { name: "Comida em casa" },
+    });
+    const restaurantsCategory = await prisma.category.findFirst({
+        where: { name: "Restaurantes" },
+    });
+    const transportesCategory = await prisma.category.findFirst({
+        where: { name: "Transportes" },
+    });
+    const rendaCategory = await prisma.category.findFirst({
+        where: { name: "Renda" },
+    });
+    const saudeCategory = await prisma.category.findFirst({
+        where: { name: "Saude" },
+    });
+    const entretenimentoCategory = await prisma.category.findFirst({
+        where: { name: "Entretenimento" },
+    });
+
+    const expenseTemplates = [
+        {
+            category: rendaCategory,
+            description: "Renda mensal",
+            amount: 1200,
+            type: "shared",
+            paidByIndex: 0,
+        },
+        {
+            category: comidaCategory,
+            description: "Supermercado",
+            amount: 150,
+            type: "shared",
+            paidByIndex: 0,
+        },
+        {
+            category: comidaCategory,
+            description: "Supermercado semanal",
+            amount: 120,
+            type: "shared",
+            paidByIndex: 1,
+        },
+        {
+            category: restaurantsCategory,
+            description: "Jantar em restaurante",
+            amount: 45,
+            type: "shared",
+            paidByIndex: 0,
+        },
+        {
+            category: restaurantsCategory,
+            description: "Almoço fora",
+            amount: 30,
+            type: "shared",
+            paidByIndex: 1,
+        },
+        {
+            category: transportesCategory,
+            description: "Combustível",
+            amount: 60,
+            type: "personal",
+            paidByIndex: 0,
+        },
+        {
+            category: transportesCategory,
+            description: "Passe mensal",
+            amount: 40,
+            type: "personal",
+            paidByIndex: 1,
+        },
+        {
+            category: saudeCategory,
+            description: "Farmácia",
+            amount: 25,
+            type: "shared",
+            paidByIndex: 0,
+        },
+        {
+            category: entretenimentoCategory,
+            description: "Cinema",
+            amount: 20,
+            type: "shared",
+            paidByIndex: 1,
+        },
+    ];
+
+    for (const month of months) {
+        for (const template of expenseTemplates) {
+            if (!template.category) continue;
+
+            const dayOffset = Math.floor(Math.random() * 28) + 1;
+            const expenseDate = new Date(
+                month.getFullYear(),
+                month.getMonth(),
+                dayOffset,
+            );
+
+            const paidByUser = users[template.paidByIndex % users.length];
+
+            const expense = await prisma.expense.create({
+                data: {
+                    date: expenseDate.toISOString(),
+                    description: template.description,
+                    amount:
+                        template.amount + Math.floor(Math.random() * 20) - 10, // Add some variance
+                    currency: "EUR",
+                    type: template.type,
+                    paid: true,
+                    categoryId: template.category.id,
+                    paidById: paidByUser.id,
+                },
+            });
+
+            // Create splits
+            if (template.type === "shared") {
+                // Get all active users and their ratios
+                const activeUsers = await prisma.user.findMany({
+                    include: {
+                        _count: true,
+                    },
+                });
+
+                const userRatios = await prisma.userSplitRatio.findMany({
+                    where: {
+                        userId: { in: activeUsers.map((u) => u.id) },
+                        isActive: true,
+                    },
+                });
+
+                // Calculate split based on ratios (or equal if no ratios)
+                const totalRatio = userRatios.reduce(
+                    (sum, ur) => sum + ur.ratio,
+                    0,
+                );
+
+                const splits = userRatios.map((ur) => ({
+                    expenseId: expense.id,
+                    userId: ur.userId,
+                    amount: (expense.amount * ur.ratio) / totalRatio,
+                    paid: ur.userId === paidByUser.id,
+                }));
+
+                await prisma.expenseSplit.createMany({
+                    data: splits,
+                });
+            } else {
+                // Personal expense
+                await prisma.expenseSplit.create({
+                    data: {
+                        expenseId: expense.id,
+                        userId: paidByUser.id,
+                        amount: expense.amount,
+                        paid: true,
+                    },
+                });
+            }
+        }
+    }
+
+    console.log("Created sample expenses");
 
     console.log("Seeding completed!");
 }
