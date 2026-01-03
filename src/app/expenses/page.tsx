@@ -55,12 +55,33 @@ interface Expense {
     splits: ExpenseSplit[];
 }
 
+interface Income {
+    id: string;
+    userId: string;
+    date: string;
+    description: string;
+    amount: number;
+    currency: string;
+    type: string;
+    user: User;
+}
+
+interface MonthlyIncome {
+    [key: string]: {
+        andre: { [type: string]: number };
+        rita: { [type: string]: number };
+    };
+}
+
 export default function ExpensesPage() {
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
+    const [incomes, setIncomes] = useState<Income[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddDialog, setShowAddDialog] = useState(false);
     const [selectedMonth, setSelectedMonth] = useState<string>("all");
+    const [budgetYear, setBudgetYear] = useState<string>("");
+    const [budgetMonthNum, setBudgetMonthNum] = useState<string>("");
     const [selectedCategory, setSelectedCategory] = useState<string>("all");
     const [formData, setFormData] = useState({
         date: new Date().toISOString().split("T")[0],
@@ -74,10 +95,26 @@ export default function ExpensesPage() {
         ritaAmount: "",
     });
 
+    const [editingIncome, setEditingIncome] = useState<{
+        [key: string]: string;
+    }>({});
+
+    const incomeTypes = ["Salario", "Beneficios", "Extras"];
+
     useEffect(() => {
         fetchExpenses();
         fetchCategories();
+        fetchIncomes();
     }, []);
+
+    // Set initial budget year and month to current
+    useEffect(() => {
+        if (!budgetYear && !budgetMonthNum) {
+            const now = new Date();
+            setBudgetYear(now.getFullYear().toString());
+            setBudgetMonthNum(String(now.getMonth() + 1).padStart(2, "0"));
+        }
+    }, [budgetYear, budgetMonthNum]);
 
     const fetchExpenses = async () => {
         try {
@@ -102,6 +139,18 @@ export default function ExpensesPage() {
             }
         } catch (error) {
             console.error("Error fetching categories:", error);
+        }
+    };
+
+    const fetchIncomes = async () => {
+        try {
+            const response = await fetch("/api/income");
+            const data = await response.json();
+            if (data.success) {
+                setIncomes(data.incomes);
+            }
+        } catch (error) {
+            console.error("Error fetching incomes:", error);
         }
     };
 
@@ -188,6 +237,84 @@ export default function ExpensesPage() {
         }
     };
 
+    const updateIncome = async (
+        userId: string,
+        type: string,
+        amount: string,
+    ) => {
+        const numAmount = parseFloat(amount) || 0;
+
+        // Find existing MANUAL income entry for this month, user, and type (not from transactions)
+        const monthStart = new Date(budgetMonth + "-01");
+        const existingIncome = incomes.find(
+            (inc) =>
+                inc.userId === userId &&
+                inc.type === type &&
+                new Date(inc.date).getMonth() === monthStart.getMonth() &&
+                new Date(inc.date).getFullYear() === monthStart.getFullYear() &&
+                !inc.transactions?.length, // Only manual entries (not linked to transactions)
+        );
+
+        try {
+            if (existingIncome) {
+                if (numAmount === 0) {
+                    // Delete if amount is 0
+                    await fetch(`/api/income?id=${existingIncome.id}`, {
+                        method: "DELETE",
+                    });
+                } else {
+                    // Update existing
+                    await fetch("/api/income", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            id: existingIncome.id,
+                            userId,
+                            date: monthStart.toISOString(),
+                            description: `${type} - ${selectedMonth}`,
+                            type,
+                            amount: numAmount,
+                            currency: "EUR",
+                        }),
+                    });
+                }
+            } else if (numAmount > 0) {
+                // Create new
+                await fetch("/api/income", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        userId,
+                        date: monthStart.toISOString(),
+                        description: `${type} - ${selectedMonth}`,
+                        type,
+                        amount: numAmount,
+                        currency: "EUR",
+                    }),
+                });
+            }
+            await fetchIncomes();
+        } catch (error) {
+            console.error("Error updating income:", error);
+        }
+    };
+
+    const getIncomeAmount = (userId: string, type: string): number => {
+        if (!budgetMonth) return 0;
+        const monthStart = new Date(budgetMonth + "-01");
+        // Sum all income for this user/type/month (from both transactions and manual entries)
+        return incomes
+            .filter(
+                (inc) =>
+                    inc.userId === userId &&
+                    inc.type === type &&
+                    new Date(inc.date).getMonth() === monthStart.getMonth() &&
+                    new Date(inc.date).getFullYear() ===
+                        monthStart.getFullYear(),
+            )
+            .reduce((sum, inc) => sum + inc.amount, 0);
+    };
+
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat("pt-PT", {
             style: "currency",
@@ -210,10 +337,10 @@ export default function ExpensesPage() {
     const getMonthLabel = (monthKey: string) => {
         const [year, month] = monthKey.split("-");
         const date = new Date(parseInt(year), parseInt(month) - 1);
-        return date.toLocaleDateString("pt-PT", {
+        const monthName = date.toLocaleDateString("pt-PT", {
             month: "long",
-            year: "numeric",
         });
+        return `${monthName.charAt(0).toUpperCase() + monthName.slice(1)} ${year}`;
     };
 
     const filteredExpenses = expenses.filter((exp) => {
@@ -224,23 +351,71 @@ export default function ExpensesPage() {
         return monthMatch && categoryMatch;
     });
 
+    const currentMonth = new Date().toISOString().slice(0, 7);
     const availableMonths = Array.from(
-        new Set(expenses.map((exp) => getMonthKey(exp.date))),
+        new Set([
+            currentMonth,
+            ...expenses.map((exp) => getMonthKey(exp.date)),
+        ]),
     ).sort((a, b) => b.localeCompare(a));
 
+    const availableYears = Array.from(
+        new Set(availableMonths.map((m) => m.split("-")[0])),
+    ).sort((a, b) => b.localeCompare(a));
+
+    const budgetMonth =
+        budgetYear && budgetMonthNum ? `${budgetYear}-${budgetMonthNum}` : "";
+
+    const monthNames = [
+        "Janeiro",
+        "Fevereiro",
+        "Março",
+        "Abril",
+        "Maio",
+        "Junho",
+        "Julho",
+        "Agosto",
+        "Setembro",
+        "Outubro",
+        "Novembro",
+        "Dezembro",
+    ];
+
     const calculateStats = () => {
+        // For budget tab, use budgetMonth; otherwise use all filtered expenses
+        const expensesForStats = filteredExpenses;
+
+        // Filter expenses by budget month for budget calculations
+        const budgetMonthExpenses =
+            budgetMonth !== "all"
+                ? expenses.filter(
+                      (exp) => getMonthKey(exp.date) === budgetMonth,
+                  )
+                : expenses;
+
         // Total spending (all expenses - for tracking)
-        const andreTotal = filteredExpenses.reduce((sum, exp) => {
+        const andreTotal = expensesForStats.reduce((sum, exp) => {
             const andreSplit = exp.splits.find((s) => s.userId === "andre");
             return sum + (andreSplit?.amount || 0);
         }, 0);
 
-        const ritaTotal = filteredExpenses.reduce((sum, exp) => {
+        const ritaTotal = expensesForStats.reduce((sum, exp) => {
             const ritaSplit = exp.splits.find((s) => s.userId === "rita");
             return sum + (ritaSplit?.amount || 0);
         }, 0);
 
         const total = andreTotal + ritaTotal;
+
+        // Budget month totals (for Budget tab)
+        const andreBudgetTotal = budgetMonthExpenses.reduce((sum, exp) => {
+            const andreSplit = exp.splits.find((s) => s.userId === "andre");
+            return sum + (andreSplit?.amount || 0);
+        }, 0);
+
+        const ritaBudgetTotal = budgetMonthExpenses.reduce((sum, exp) => {
+            const ritaSplit = exp.splits.find((s) => s.userId === "rita");
+            return sum + (ritaSplit?.amount || 0);
+        }, 0);
 
         // Balance calculation (only unpaid shared expenses)
         // For shared expenses: person who didn't pay owes their share to person who did pay
@@ -327,6 +502,8 @@ export default function ExpensesPage() {
             total,
             andreOwes,
             ritaOwes,
+            andreBudgetTotal,
+            ritaBudgetTotal,
             categoryTotals,
             monthTotals,
         };
@@ -602,6 +779,7 @@ export default function ExpensesPage() {
                 <TabsList>
                     <TabsTrigger value="transactions">Transactions</TabsTrigger>
                     <TabsTrigger value="summary">Summary</TabsTrigger>
+                    <TabsTrigger value="budget">Budget</TabsTrigger>
                     <TabsTrigger value="categories">By Category</TabsTrigger>
                     <TabsTrigger value="monthly">By Month</TabsTrigger>
                 </TabsList>
@@ -875,6 +1053,382 @@ export default function ExpensesPage() {
                     </div>
                 </TabsContent>
 
+                <TabsContent value="budget" className="space-y-6">
+                    {budgetMonth ? (
+                        <>
+                            <div className="flex items-center gap-4 mb-6">
+                                <label className="text-sm font-semibold">
+                                    Year:
+                                </label>
+                                <select
+                                    value={budgetYear}
+                                    onChange={(e) =>
+                                        setBudgetYear(e.target.value)
+                                    }
+                                    className="p-2 border rounded-md text-lg font-medium"
+                                >
+                                    {availableYears.map((year) => (
+                                        <option key={year} value={year}>
+                                            {year}
+                                        </option>
+                                    ))}
+                                </select>
+
+                                <label className="text-sm font-semibold">
+                                    Month:
+                                </label>
+                                <select
+                                    value={budgetMonthNum}
+                                    onChange={(e) =>
+                                        setBudgetMonthNum(e.target.value)
+                                    }
+                                    className="p-2 border rounded-md text-lg font-medium"
+                                >
+                                    {monthNames.map((name, idx) => (
+                                        <option
+                                            key={idx + 1}
+                                            value={String(idx + 1).padStart(
+                                                2,
+                                                "0",
+                                            )}
+                                        >
+                                            {name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="grid gap-6 md:grid-cols-2">
+                                {/* Rita's Budget */}
+                                <Card className="overflow-hidden p-0">
+                                    <CardHeader className="bg-pink-50 pb-6 px-6 pt-6">
+                                        <CardTitle className="text-pink-900 text-xl">
+                                            Rita Pereira
+                                        </CardTitle>
+                                        <CardDescription className="text-base">
+                                            Monthly budget for{" "}
+                                            {getMonthLabel(budgetMonth)}
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="pt-6 px-6 pb-6">
+                                        <div className="space-y-4">
+                                            <div>
+                                                <h4 className="font-semibold text-sm text-gray-600 mb-3">
+                                                    💰 Income
+                                                </h4>
+                                                {incomeTypes.map((type) => {
+                                                    const amount =
+                                                        getIncomeAmount(
+                                                            "rita",
+                                                            type,
+                                                        );
+                                                    if (amount === 0)
+                                                        return null;
+                                                    return (
+                                                        <div
+                                                            key={type}
+                                                            className="flex justify-between items-center py-2 border-b"
+                                                        >
+                                                            <span className="text-sm">
+                                                                {type}
+                                                            </span>
+                                                            <span className="font-semibold">
+                                                                {formatCurrency(
+                                                                    amount,
+                                                                )}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                                {incomeTypes.every(
+                                                    (type) =>
+                                                        getIncomeAmount(
+                                                            "rita",
+                                                            type,
+                                                        ) === 0,
+                                                ) && (
+                                                    <p className="text-sm text-gray-500 italic py-2">
+                                                        No tracked income. Track
+                                                        deposits on Transactions
+                                                        tab.
+                                                    </p>
+                                                )}
+                                                <div className="flex justify-between items-center py-3 font-bold text-green-700 bg-green-50 px-2 rounded mt-2">
+                                                    <span>Total Income</span>
+                                                    <span>
+                                                        {formatCurrency(
+                                                            incomeTypes.reduce(
+                                                                (sum, type) =>
+                                                                    sum +
+                                                                    getIncomeAmount(
+                                                                        "rita",
+                                                                        type,
+                                                                    ),
+                                                                0,
+                                                            ),
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <h4 className="font-semibold text-sm text-gray-600 mb-3">
+                                                    💸 Expenses
+                                                </h4>
+                                                <div className="flex justify-between items-center py-3 font-bold text-red-700 bg-red-50 px-2 rounded">
+                                                    <span>Total Expenses</span>
+                                                    <span>
+                                                        {formatCurrency(
+                                                            stats.ritaBudgetTotal,
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div
+                                                className={`p-4 rounded-lg text-center ${
+                                                    incomeTypes.reduce(
+                                                        (sum, type) =>
+                                                            sum +
+                                                            getIncomeAmount(
+                                                                "rita",
+                                                                type,
+                                                            ),
+                                                        0,
+                                                    ) -
+                                                        stats.ritaBudgetTotal >=
+                                                    0
+                                                        ? "bg-green-100 border-2 border-green-300"
+                                                        : "bg-red-100 border-2 border-red-300"
+                                                }`}
+                                            >
+                                                <p className="text-sm font-medium text-gray-600 mb-1">
+                                                    {incomeTypes.reduce(
+                                                        (sum, type) =>
+                                                            sum +
+                                                            getIncomeAmount(
+                                                                "rita",
+                                                                type,
+                                                            ),
+                                                        0,
+                                                    ) -
+                                                        stats.ritaBudgetTotal >=
+                                                    0
+                                                        ? "💚 Saved"
+                                                        : "⚠️ Over Budget"}
+                                                </p>
+                                                <p
+                                                    className={`text-3xl font-bold ${
+                                                        incomeTypes.reduce(
+                                                            (sum, type) =>
+                                                                sum +
+                                                                getIncomeAmount(
+                                                                    "rita",
+                                                                    type,
+                                                                ),
+                                                            0,
+                                                        ) -
+                                                            stats.ritaBudgetTotal >=
+                                                        0
+                                                            ? "text-green-900"
+                                                            : "text-red-900"
+                                                    }`}
+                                                >
+                                                    {formatCurrency(
+                                                        incomeTypes.reduce(
+                                                            (sum, type) =>
+                                                                sum +
+                                                                getIncomeAmount(
+                                                                    "rita",
+                                                                    type,
+                                                                ),
+                                                            0,
+                                                        ) -
+                                                            stats.ritaBudgetTotal,
+                                                    )}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                {/* André's Budget */}
+                                <Card className="overflow-hidden p-0">
+                                    <CardHeader className="bg-blue-50 pb-6 px-6 pt-6">
+                                        <CardTitle className="text-blue-900 text-xl">
+                                            André Ribeiro
+                                        </CardTitle>
+                                        <CardDescription className="text-base">
+                                            Monthly budget for{" "}
+                                            {getMonthLabel(budgetMonth)}
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="pt-6 px-6 pb-6">
+                                        <div className="space-y-4">
+                                            <div>
+                                                <h4 className="font-semibold text-sm text-gray-600 mb-3">
+                                                    💰 Income
+                                                </h4>
+                                                {incomeTypes.map((type) => {
+                                                    const amount =
+                                                        getIncomeAmount(
+                                                            "andre",
+                                                            type,
+                                                        );
+                                                    if (amount === 0)
+                                                        return null;
+                                                    return (
+                                                        <div
+                                                            key={type}
+                                                            className="flex justify-between items-center py-2 border-b"
+                                                        >
+                                                            <span className="text-sm">
+                                                                {type}
+                                                            </span>
+                                                            <span className="font-semibold">
+                                                                {formatCurrency(
+                                                                    amount,
+                                                                )}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                                {incomeTypes.every(
+                                                    (type) =>
+                                                        getIncomeAmount(
+                                                            "andre",
+                                                            type,
+                                                        ) === 0,
+                                                ) && (
+                                                    <p className="text-sm text-gray-500 italic py-2">
+                                                        No tracked income. Track
+                                                        deposits on Transactions
+                                                        tab.
+                                                    </p>
+                                                )}
+                                                <div className="flex justify-between items-center py-3 font-bold text-green-700 bg-green-50 px-2 rounded mt-2">
+                                                    <span>Total Income</span>
+                                                    <span>
+                                                        {formatCurrency(
+                                                            incomeTypes.reduce(
+                                                                (sum, type) =>
+                                                                    sum +
+                                                                    getIncomeAmount(
+                                                                        "andre",
+                                                                        type,
+                                                                    ),
+                                                                0,
+                                                            ),
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <h4 className="font-semibold text-sm text-gray-600 mb-3">
+                                                    💸 Expenses
+                                                </h4>
+                                                <div className="flex justify-between items-center py-3 font-bold text-red-700 bg-red-50 px-2 rounded">
+                                                    <span>Total Expenses</span>
+                                                    <span>
+                                                        {formatCurrency(
+                                                            stats.andreBudgetTotal,
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div
+                                                className={`p-4 rounded-lg text-center ${
+                                                    incomeTypes.reduce(
+                                                        (sum, type) =>
+                                                            sum +
+                                                            getIncomeAmount(
+                                                                "andre",
+                                                                type,
+                                                            ),
+                                                        0,
+                                                    ) -
+                                                        stats.andreBudgetTotal >=
+                                                    0
+                                                        ? "bg-green-100 border-2 border-green-300"
+                                                        : "bg-red-100 border-2 border-red-300"
+                                                }`}
+                                            >
+                                                <p className="text-sm font-medium text-gray-600 mb-1">
+                                                    {incomeTypes.reduce(
+                                                        (sum, type) =>
+                                                            sum +
+                                                            getIncomeAmount(
+                                                                "andre",
+                                                                type,
+                                                            ),
+                                                        0,
+                                                    ) -
+                                                        stats.andreBudgetTotal >=
+                                                    0
+                                                        ? "💚 Saved"
+                                                        : "⚠️ Over Budget"}
+                                                </p>
+                                                <p
+                                                    className={`text-3xl font-bold ${
+                                                        incomeTypes.reduce(
+                                                            (sum, type) =>
+                                                                sum +
+                                                                getIncomeAmount(
+                                                                    "andre",
+                                                                    type,
+                                                                ),
+                                                            0,
+                                                        ) -
+                                                            stats.andreBudgetTotal >=
+                                                        0
+                                                            ? "text-green-900"
+                                                            : "text-red-900"
+                                                    }`}
+                                                >
+                                                    {formatCurrency(
+                                                        incomeTypes.reduce(
+                                                            (sum, type) =>
+                                                                sum +
+                                                                getIncomeAmount(
+                                                                    "andre",
+                                                                    type,
+                                                                ),
+                                                            0,
+                                                        ) -
+                                                            stats.andreBudgetTotal,
+                                                    )}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+
+                            <Card className="bg-gray-50">
+                                <CardContent className="pt-6">
+                                    <p className="text-sm text-gray-600 text-center">
+                                        💡 <strong>Tip:</strong> Go to
+                                        Transactions tab → Click on deposits →
+                                        Track as income (Salario, Beneficios, or
+                                        Extras)
+                                    </p>
+                                </CardContent>
+                            </Card>
+                        </>
+                    ) : (
+                        <Card>
+                            <CardContent className="py-12">
+                                <p className="text-center text-gray-500">
+                                    No expenses found. Add some expenses to see
+                                    budget tracking.
+                                </p>
+                            </CardContent>
+                        </Card>
+                    )}
+                </TabsContent>
+
                 <TabsContent value="categories" className="space-y-4">
                     <Card>
                         <CardHeader>
@@ -884,55 +1438,102 @@ export default function ExpensesPage() {
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="space-y-4">
-                                {Object.entries(stats.categoryTotals)
-                                    .sort(
-                                        ([, a], [, b]) =>
-                                            b.andre +
-                                            b.rita -
-                                            (a.andre + a.rita),
-                                    )
-                                    .map(([categoryName, totals]) => {
-                                        const total =
-                                            totals.andre + totals.rita;
-                                        return (
-                                            <div
-                                                key={categoryName}
-                                                className="p-4 border rounded-lg"
-                                            >
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <h3 className="font-semibold">
-                                                        {categoryName}
-                                                    </h3>
-                                                    <span className="font-bold">
-                                                        {formatCurrency(total)}
-                                                    </span>
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-4 text-sm">
-                                                    <div>
-                                                        <p className="text-muted-foreground">
-                                                            Andre Ribeiro
-                                                        </p>
-                                                        <p className="font-semibold">
-                                                            {formatCurrency(
-                                                                totals.andre,
-                                                            )}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-muted-foreground">
-                                                            Rita Pereira
-                                                        </p>
-                                                        <p className="font-semibold">
-                                                            {formatCurrency(
-                                                                totals.rita,
-                                                            )}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
+                            <div className="overflow-x-auto">
+                                <table className="w-full border-collapse">
+                                    <thead>
+                                        <tr className="border-b-2 border-gray-300">
+                                            <th className="text-left p-3 font-semibold bg-gray-50">
+                                                Categoria
+                                            </th>
+                                            <th className="text-right p-3 font-semibold bg-blue-50">
+                                                Andre Ribeiro
+                                            </th>
+                                            <th className="text-right p-3 font-semibold bg-pink-50">
+                                                Rita Pereira
+                                            </th>
+                                            <th className="text-right p-3 font-semibold bg-gray-100">
+                                                Total geral
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {Object.entries(stats.categoryTotals)
+                                            .sort(
+                                                ([, a], [, b]) =>
+                                                    b.andre +
+                                                    b.rita -
+                                                    (a.andre + a.rita),
+                                            )
+                                            .map(([categoryName, totals]) => {
+                                                const total =
+                                                    totals.andre + totals.rita;
+                                                const category =
+                                                    categories.find(
+                                                        (c) =>
+                                                            c.name ===
+                                                            categoryName,
+                                                    );
+                                                return (
+                                                    <tr
+                                                        key={categoryName}
+                                                        className="border-b border-gray-200 hover:bg-gray-50 transition-colors"
+                                                    >
+                                                        <td className="p-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-xl">
+                                                                    {
+                                                                        category?.icon
+                                                                    }
+                                                                </span>
+                                                                <span className="font-medium">
+                                                                    {
+                                                                        categoryName
+                                                                    }
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="text-right p-3 bg-blue-50/30">
+                                                            <span className="font-semibold text-blue-900">
+                                                                {formatCurrency(
+                                                                    totals.andre,
+                                                                )}
+                                                            </span>
+                                                        </td>
+                                                        <td className="text-right p-3 bg-pink-50/30">
+                                                            <span className="font-semibold text-pink-900">
+                                                                {formatCurrency(
+                                                                    totals.rita,
+                                                                )}
+                                                            </span>
+                                                        </td>
+                                                        <td className="text-right p-3 bg-gray-100/50">
+                                                            <span className="font-bold">
+                                                                {formatCurrency(
+                                                                    total,
+                                                                )}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        <tr className="border-t-2 border-gray-300 font-bold bg-gray-50">
+                                            <td className="p-3">Total geral</td>
+                                            <td className="text-right p-3 bg-blue-100/50 text-blue-900">
+                                                {formatCurrency(
+                                                    stats.andreTotal,
+                                                )}
+                                            </td>
+                                            <td className="text-right p-3 bg-pink-100/50 text-pink-900">
+                                                {formatCurrency(
+                                                    stats.ritaTotal,
+                                                )}
+                                            </td>
+                                            <td className="text-right p-3 bg-gray-200 text-lg">
+                                                {formatCurrency(stats.total)}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </CardContent>
                     </Card>

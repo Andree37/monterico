@@ -65,6 +65,8 @@ interface Transaction {
     pending: boolean;
     linkedToExpense: boolean;
     expenseId: string | null;
+    linkedToIncome: boolean;
+    incomeId: string | null;
     account: {
         name: string;
         type: string;
@@ -109,6 +111,14 @@ export default function Home() {
             type: "shared" | "personal";
         };
     }>({});
+    const [quickIncomeImport, setQuickIncomeImport] = useState<{
+        [key: string]: {
+            incomeType: string;
+            userId: string;
+        };
+    }>({});
+
+    const incomeTypes = ["Salario", "Beneficios", "Extras"];
 
     const fetchBankConnections = async () => {
         try {
@@ -276,6 +286,16 @@ export default function Home() {
                     },
                 });
             }
+            // Initialize quick income import with defaults
+            if (!quickIncomeImport[transactionId]) {
+                setQuickIncomeImport({
+                    ...quickIncomeImport,
+                    [transactionId]: {
+                        incomeType: "",
+                        userId: "andre",
+                    },
+                });
+            }
         }
     };
 
@@ -361,6 +381,69 @@ export default function Home() {
         } catch (error) {
             console.error("Error importing transaction:", error);
         }
+    };
+
+    const importIncomeInline = async (transaction: Transaction) => {
+        const importData = quickIncomeImport[transaction.transactionId];
+        if (!importData || !importData.incomeType) {
+            alert("Please select an income type");
+            return;
+        }
+
+        const amount = Math.abs(transaction.amount);
+        const monthKey = transaction.date.slice(0, 7); // YYYY-MM format
+
+        try {
+            const response = await fetch("/api/income", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    userId: importData.userId,
+                    date: transaction.date,
+                    description: `${importData.incomeType} - ${transaction.name}`,
+                    type: importData.incomeType,
+                    amount: amount,
+                    currency: transaction.currency || "EUR",
+                }),
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                // Link transaction to income
+                await fetch("/api/plaid/transactions", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        transactionId: transaction.transactionId,
+                        linkedToIncome: true,
+                        incomeId: data.income.id,
+                    }),
+                });
+
+                await fetchTransactions();
+                setExpandedTransaction(null);
+                // Remove from quickIncomeImport
+                const newQuickImport = { ...quickIncomeImport };
+                delete newQuickImport[transaction.transactionId];
+                setQuickIncomeImport(newQuickImport);
+            }
+        } catch (error) {
+            console.error("Error importing income:", error);
+        }
+    };
+
+    const updateQuickIncomeImport = (
+        transactionId: string,
+        field: string,
+        value: any,
+    ) => {
+        setQuickIncomeImport({
+            ...quickIncomeImport,
+            [transactionId]: {
+                ...quickIncomeImport[transactionId],
+                [field]: value,
+            },
+        });
     };
 
     const formatCurrency = (amount: number, currency: string = "EUR") => {
@@ -669,266 +752,416 @@ export default function Home() {
                                 </p>
                             ) : (
                                 <div className="space-y-2">
-                                    {transactions.map((transaction) => (
-                                        <div
-                                            key={transaction.id}
-                                            className={`border rounded-lg overflow-hidden ${
-                                                transaction.linkedToExpense
-                                                    ? "bg-green-50 border-green-200"
-                                                    : ""
-                                            }`}
-                                        >
-                                            <div className="flex items-center justify-between p-3 hover:bg-muted/50 transition-colors">
-                                                <div className="flex items-center gap-3 flex-1">
-                                                    {transaction.linkedToExpense ? (
-                                                        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-green-500 text-white">
-                                                            <Check className="h-4 w-4" />
-                                                        </div>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() =>
-                                                                toggleTransactionExpand(
-                                                                    transaction.transactionId,
-                                                                )
-                                                            }
-                                                            className="flex items-center justify-center w-6 h-6 rounded border-2 border-gray-300 hover:border-blue-500 transition-colors"
-                                                        >
-                                                            {expandedTransaction ===
-                                                                transaction.transactionId && (
-                                                                <X className="h-3 w-3" />
-                                                            )}
-                                                        </button>
-                                                    )}
-                                                    <div className="flex-1">
-                                                        <p className="font-medium">
-                                                            {transaction.name}
-                                                        </p>
-                                                        <p className="text-sm text-muted-foreground">
-                                                            {transaction
-                                                                .bankConnection
-                                                                ?.institutionName && (
-                                                                <>
-                                                                    {
-                                                                        transaction
-                                                                            .bankConnection
-                                                                            .institutionName
-                                                                    }{" "}
-                                                                    -{" "}
-                                                                </>
-                                                            )}
-                                                            {
-                                                                transaction
-                                                                    .account
-                                                                    .name
-                                                            }{" "}
-                                                            •{" "}
-                                                            {formatDate(
-                                                                transaction.date,
-                                                            )}
-                                                            {transaction.pending && (
-                                                                <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
-                                                                    Pending
-                                                                </span>
-                                                            )}
-                                                        </p>
-                                                        {transaction.category && (
-                                                            <p className="text-xs text-muted-foreground mt-1">
-                                                                {
-                                                                    transaction.category
+                                    {transactions.map((transaction) => {
+                                        const isExpense =
+                                            transaction.amount > 0;
+                                        const isIncome = transaction.amount < 0;
+                                        const isTracked =
+                                            transaction.linkedToExpense ||
+                                            transaction.linkedToIncome;
+
+                                        return (
+                                            <div
+                                                key={transaction.id}
+                                                className={`border rounded-lg overflow-hidden ${
+                                                    isTracked
+                                                        ? "bg-green-50 border-green-200"
+                                                        : ""
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between p-3 hover:bg-muted/50 transition-colors">
+                                                    <div className="flex items-center gap-3 flex-1">
+                                                        {isTracked ? (
+                                                            <div className="flex items-center justify-center w-6 h-6 rounded-full bg-green-500 text-white">
+                                                                <Check className="h-4 w-4" />
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() =>
+                                                                    toggleTransactionExpand(
+                                                                        transaction.transactionId,
+                                                                    )
                                                                 }
+                                                                className="flex items-center justify-center w-6 h-6 rounded border-2 border-gray-300 hover:border-blue-500 transition-colors"
+                                                            >
+                                                                {expandedTransaction ===
+                                                                    transaction.transactionId && (
+                                                                    <X className="h-3 w-3" />
+                                                                )}
+                                                            </button>
+                                                        )}
+                                                        <div className="flex-1">
+                                                            <p className="font-medium">
+                                                                {
+                                                                    transaction.name
+                                                                }
+                                                            </p>
+                                                            <p className="text-sm text-muted-foreground">
+                                                                {transaction
+                                                                    .bankConnection
+                                                                    ?.institutionName && (
+                                                                    <>
+                                                                        {
+                                                                            transaction
+                                                                                .bankConnection
+                                                                                .institutionName
+                                                                        }{" "}
+                                                                        -{" "}
+                                                                    </>
+                                                                )}
+                                                                {
+                                                                    transaction
+                                                                        .account
+                                                                        .name
+                                                                }{" "}
+                                                                •{" "}
+                                                                {formatDate(
+                                                                    transaction.date,
+                                                                )}
+                                                                {transaction.pending && (
+                                                                    <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
+                                                                        Pending
+                                                                    </span>
+                                                                )}
+                                                            </p>
+                                                            {transaction.category && (
+                                                                <p className="text-xs text-muted-foreground mt-1">
+                                                                    {
+                                                                        transaction.category
+                                                                    }
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p
+                                                            className={`font-semibold ${
+                                                                transaction.amount >
+                                                                0
+                                                                    ? "text-red-600"
+                                                                    : "text-green-600"
+                                                            }`}
+                                                        >
+                                                            {transaction.amount >
+                                                            0
+                                                                ? "-"
+                                                                : "+"}
+                                                            {formatCurrency(
+                                                                Math.abs(
+                                                                    transaction.amount,
+                                                                ),
+                                                                transaction.currency ||
+                                                                    "EUR",
+                                                            )}
+                                                        </p>
+                                                        {transaction.linkedToExpense && (
+                                                            <p className="text-xs text-green-600 font-medium">
+                                                                Tracked
+                                                                (Expense)
+                                                            </p>
+                                                        )}
+                                                        {transaction.linkedToIncome && (
+                                                            <p className="text-xs text-green-600 font-medium">
+                                                                Tracked (Income)
                                                             </p>
                                                         )}
                                                     </div>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p
-                                                        className={`font-semibold ${
-                                                            transaction.amount >
-                                                            0
-                                                                ? "text-red-600"
-                                                                : "text-green-600"
-                                                        }`}
-                                                    >
-                                                        {transaction.amount > 0
-                                                            ? "-"
-                                                            : "+"}
-                                                        {formatCurrency(
-                                                            Math.abs(
-                                                                transaction.amount,
-                                                            ),
-                                                            transaction.currency ||
-                                                                "EUR",
-                                                        )}
-                                                    </p>
-                                                    {transaction.linkedToExpense && (
-                                                        <p className="text-xs text-green-600 font-medium">
-                                                            Tracked
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </div>
 
-                                            {expandedTransaction ===
-                                                transaction.transactionId &&
-                                                !transaction.linkedToExpense && (
-                                                    <div className="px-3 pb-3 pt-2 bg-muted/30 border-t">
-                                                        <p className="text-xs font-medium mb-2 text-muted-foreground">
-                                                            Quick Import to
-                                                            Expenses
-                                                        </p>
-                                                        <div className="grid grid-cols-3 gap-2">
-                                                            <select
-                                                                value={
-                                                                    quickImport[
-                                                                        transaction
-                                                                            .transactionId
-                                                                    ]
-                                                                        ?.categoryId ||
-                                                                    ""
-                                                                }
-                                                                onChange={(e) =>
-                                                                    updateQuickImport(
-                                                                        transaction.transactionId,
-                                                                        "categoryId",
-                                                                        e.target
-                                                                            .value,
-                                                                    )
-                                                                }
-                                                                className="p-2 border rounded text-sm"
-                                                            >
-                                                                <option value="">
-                                                                    Category...
-                                                                </option>
-                                                                {categories.map(
-                                                                    (cat) => (
-                                                                        <option
-                                                                            key={
-                                                                                cat.id
-                                                                            }
+                                                {expandedTransaction ===
+                                                    transaction.transactionId &&
+                                                    !isTracked && (
+                                                        <div className="px-3 pb-3 pt-2 bg-muted/30 border-t">
+                                                            <p className="text-xs font-medium mb-2 text-muted-foreground">
+                                                                {isExpense
+                                                                    ? "Quick Import to Expenses"
+                                                                    : "Quick Import to Income"}
+                                                            </p>
+                                                            {isExpense ? (
+                                                                <>
+                                                                    <div className="grid grid-cols-3 gap-2">
+                                                                        <select
                                                                             value={
-                                                                                cat.id
+                                                                                quickImport[
+                                                                                    transaction
+                                                                                        .transactionId
+                                                                                ]
+                                                                                    ?.categoryId ||
+                                                                                ""
+                                                                            }
+                                                                            onChange={(
+                                                                                e,
+                                                                            ) =>
+                                                                                updateQuickImport(
+                                                                                    transaction.transactionId,
+                                                                                    "categoryId",
+                                                                                    e
+                                                                                        .target
+                                                                                        .value,
+                                                                                )
+                                                                            }
+                                                                            className="p-2 border rounded text-sm"
+                                                                        >
+                                                                            <option value="">
+                                                                                Category...
+                                                                            </option>
+                                                                            {categories.map(
+                                                                                (
+                                                                                    cat,
+                                                                                ) => (
+                                                                                    <option
+                                                                                        key={
+                                                                                            cat.id
+                                                                                        }
+                                                                                        value={
+                                                                                            cat.id
+                                                                                        }
+                                                                                    >
+                                                                                        {
+                                                                                            cat.icon
+                                                                                        }{" "}
+                                                                                        {
+                                                                                            cat.name
+                                                                                        }
+                                                                                    </option>
+                                                                                ),
+                                                                            )}
+                                                                        </select>
+                                                                        <select
+                                                                            value={
+                                                                                quickImport[
+                                                                                    transaction
+                                                                                        .transactionId
+                                                                                ]
+                                                                                    ?.paidBy ||
+                                                                                settings?.defaultPaidBy ||
+                                                                                "andre"
+                                                                            }
+                                                                            onChange={(
+                                                                                e,
+                                                                            ) =>
+                                                                                updateQuickImport(
+                                                                                    transaction.transactionId,
+                                                                                    "paidBy",
+                                                                                    e
+                                                                                        .target
+                                                                                        .value,
+                                                                                )
+                                                                            }
+                                                                            className="p-2 border rounded text-sm"
+                                                                        >
+                                                                            <option value="andre">
+                                                                                Andre
+                                                                            </option>
+                                                                            <option value="rita">
+                                                                                Rita
+                                                                            </option>
+                                                                        </select>
+                                                                        <select
+                                                                            value={
+                                                                                quickImport[
+                                                                                    transaction
+                                                                                        .transactionId
+                                                                                ]
+                                                                                    ?.type ||
+                                                                                settings?.defaultType ||
+                                                                                "shared"
+                                                                            }
+                                                                            onChange={(
+                                                                                e,
+                                                                            ) =>
+                                                                                updateQuickImport(
+                                                                                    transaction.transactionId,
+                                                                                    "type",
+                                                                                    e
+                                                                                        .target
+                                                                                        .value,
+                                                                                )
+                                                                            }
+                                                                            className="p-2 border rounded text-sm"
+                                                                        >
+                                                                            <option value="shared">
+                                                                                Shared
+                                                                            </option>
+                                                                            <option value="personal">
+                                                                                Personal
+                                                                            </option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div className="flex gap-2 mt-2">
+                                                                        <Button
+                                                                            size="sm"
+                                                                            onClick={() =>
+                                                                                importTransactionInline(
+                                                                                    transaction,
+                                                                                )
+                                                                            }
+                                                                            disabled={
+                                                                                !quickImport[
+                                                                                    transaction
+                                                                                        .transactionId
+                                                                                ]
+                                                                                    ?.categoryId
+                                                                            }
+                                                                            className="flex-1"
+                                                                        >
+                                                                            <Check className="mr-1 h-3 w-3" />
+                                                                            Track
+                                                                        </Button>
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant="outline"
+                                                                            onClick={() =>
+                                                                                setExpandedTransaction(
+                                                                                    null,
+                                                                                )
                                                                             }
                                                                         >
-                                                                            {
-                                                                                cat.icon
-                                                                            }{" "}
-                                                                            {
-                                                                                cat.name
+                                                                            Cancel
+                                                                        </Button>
+                                                                    </div>
+                                                                    {quickImport[
+                                                                        transaction
+                                                                            .transactionId
+                                                                    ]?.type ===
+                                                                        "shared" && (
+                                                                        <p className="text-xs text-muted-foreground mt-2">
+                                                                            Split:{" "}
+                                                                            {Math.round(
+                                                                                (settings?.defaultAndreRatio ||
+                                                                                    0.5) *
+                                                                                    100,
+                                                                            )}
+                                                                            %
+                                                                            Andre,{" "}
+                                                                            {Math.round(
+                                                                                (settings?.defaultRitaRatio ||
+                                                                                    0.5) *
+                                                                                    100,
+                                                                            )}
+                                                                            %
+                                                                            Rita
+                                                                        </p>
+                                                                    )}
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <div className="grid grid-cols-2 gap-2">
+                                                                        <select
+                                                                            value={
+                                                                                quickIncomeImport[
+                                                                                    transaction
+                                                                                        .transactionId
+                                                                                ]
+                                                                                    ?.incomeType ||
+                                                                                ""
                                                                             }
-                                                                        </option>
-                                                                    ),
-                                                                )}
-                                                            </select>
-                                                            <select
-                                                                value={
-                                                                    quickImport[
-                                                                        transaction
-                                                                            .transactionId
-                                                                    ]?.paidBy ||
-                                                                    settings?.defaultPaidBy ||
-                                                                    "andre"
-                                                                }
-                                                                onChange={(e) =>
-                                                                    updateQuickImport(
-                                                                        transaction.transactionId,
-                                                                        "paidBy",
-                                                                        e.target
-                                                                            .value,
-                                                                    )
-                                                                }
-                                                                className="p-2 border rounded text-sm"
-                                                            >
-                                                                <option value="andre">
-                                                                    Andre
-                                                                </option>
-                                                                <option value="rita">
-                                                                    Rita
-                                                                </option>
-                                                            </select>
-                                                            <select
-                                                                value={
-                                                                    quickImport[
-                                                                        transaction
-                                                                            .transactionId
-                                                                    ]?.type ||
-                                                                    settings?.defaultType ||
-                                                                    "shared"
-                                                                }
-                                                                onChange={(e) =>
-                                                                    updateQuickImport(
-                                                                        transaction.transactionId,
-                                                                        "type",
-                                                                        e.target
-                                                                            .value,
-                                                                    )
-                                                                }
-                                                                className="p-2 border rounded text-sm"
-                                                            >
-                                                                <option value="shared">
-                                                                    Shared
-                                                                </option>
-                                                                <option value="personal">
-                                                                    Personal
-                                                                </option>
-                                                            </select>
+                                                                            onChange={(
+                                                                                e,
+                                                                            ) =>
+                                                                                updateQuickIncomeImport(
+                                                                                    transaction.transactionId,
+                                                                                    "incomeType",
+                                                                                    e
+                                                                                        .target
+                                                                                        .value,
+                                                                                )
+                                                                            }
+                                                                            className="p-2 border rounded text-sm"
+                                                                        >
+                                                                            <option value="">
+                                                                                Income
+                                                                                Type...
+                                                                            </option>
+                                                                            {incomeTypes.map(
+                                                                                (
+                                                                                    type,
+                                                                                ) => (
+                                                                                    <option
+                                                                                        key={
+                                                                                            type
+                                                                                        }
+                                                                                        value={
+                                                                                            type
+                                                                                        }
+                                                                                    >
+                                                                                        {
+                                                                                            type
+                                                                                        }
+                                                                                    </option>
+                                                                                ),
+                                                                            )}
+                                                                        </select>
+                                                                        <select
+                                                                            value={
+                                                                                quickIncomeImport[
+                                                                                    transaction
+                                                                                        .transactionId
+                                                                                ]
+                                                                                    ?.userId ||
+                                                                                "andre"
+                                                                            }
+                                                                            onChange={(
+                                                                                e,
+                                                                            ) =>
+                                                                                updateQuickIncomeImport(
+                                                                                    transaction.transactionId,
+                                                                                    "userId",
+                                                                                    e
+                                                                                        .target
+                                                                                        .value,
+                                                                                )
+                                                                            }
+                                                                            className="p-2 border rounded text-sm"
+                                                                        >
+                                                                            <option value="andre">
+                                                                                Andre
+                                                                            </option>
+                                                                            <option value="rita">
+                                                                                Rita
+                                                                            </option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div className="flex gap-2 mt-2">
+                                                                        <Button
+                                                                            size="sm"
+                                                                            onClick={() =>
+                                                                                importIncomeInline(
+                                                                                    transaction,
+                                                                                )
+                                                                            }
+                                                                            disabled={
+                                                                                !quickIncomeImport[
+                                                                                    transaction
+                                                                                        .transactionId
+                                                                                ]
+                                                                                    ?.incomeType
+                                                                            }
+                                                                            className="flex-1"
+                                                                        >
+                                                                            <Check className="mr-1 h-3 w-3" />
+                                                                            Track
+                                                                            Income
+                                                                        </Button>
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant="outline"
+                                                                            onClick={() =>
+                                                                                setExpandedTransaction(
+                                                                                    null,
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            Cancel
+                                                                        </Button>
+                                                                    </div>
+                                                                </>
+                                                            )}
                                                         </div>
-                                                        <div className="flex gap-2 mt-2">
-                                                            <Button
-                                                                size="sm"
-                                                                onClick={() =>
-                                                                    importTransactionInline(
-                                                                        transaction,
-                                                                    )
-                                                                }
-                                                                disabled={
-                                                                    !quickImport[
-                                                                        transaction
-                                                                            .transactionId
-                                                                    ]
-                                                                        ?.categoryId
-                                                                }
-                                                                className="flex-1"
-                                                            >
-                                                                <Check className="mr-1 h-3 w-3" />
-                                                                Track
-                                                            </Button>
-                                                            <Button
-                                                                size="sm"
-                                                                variant="outline"
-                                                                onClick={() =>
-                                                                    setExpandedTransaction(
-                                                                        null,
-                                                                    )
-                                                                }
-                                                            >
-                                                                Cancel
-                                                            </Button>
-                                                        </div>
-                                                        {quickImport[
-                                                            transaction
-                                                                .transactionId
-                                                        ]?.type ===
-                                                            "shared" && (
-                                                            <p className="text-xs text-muted-foreground mt-2">
-                                                                Split:{" "}
-                                                                {Math.round(
-                                                                    (settings?.defaultAndreRatio ||
-                                                                        0.5) *
-                                                                        100,
-                                                                )}
-                                                                % Andre,{" "}
-                                                                {Math.round(
-                                                                    (settings?.defaultRitaRatio ||
-                                                                        0.5) *
-                                                                        100,
-                                                                )}
-                                                                % Rita
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                )}
-                                        </div>
-                                    ))}
+                                                    )}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </CardContent>

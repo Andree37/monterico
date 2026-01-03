@@ -164,3 +164,33 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
+
+export async function PUT(request: NextRequest) {
+    try {
+        const body = await request.json();
+        const { transactionId, linkedToIncome, incomeId } = body;
+
+        if (!transactionId) {
+            return NextResponse.json(
+                { error: "Missing transaction ID" },
+                { status: 400 },
+            );
+        }
+
+        const transaction = await prisma.transaction.updateMany({
+            where: { transactionId },
+            data: {
+                linkedToIncome: linkedToIncome ?? false,
+                incomeId: incomeId || null,
+            },
+        });
+
+        return NextResponse.json({
+            success: true,
+            transaction,
+        });
+    } catch (error: any) {
+        console.error("Error updating transaction:", error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
