@@ -155,17 +155,23 @@ export async function DELETE(request: Request) {
         }
 
         // Soft delete - set isActive to false
-        await prisma.userSplitRatio.update({
+        await prisma.userSplitRatio.upsert({
             where: { userId: id },
-            data: { isActive: false },
+            update: { isActive: false },
+            create: {
+                userId: id,
+                ratio: 0.5,
+                isActive: false,
+            },
         });
 
         return NextResponse.json({ success: true });
     } catch (error) {
         console.error("Error deleting user:", error);
-        return NextResponse.json(
-            { error: "Failed to delete user" },
-            { status: 500 },
-        );
+
+        // Return more detailed error message
+        const errorMessage =
+            error instanceof Error ? error.message : "Failed to delete user";
+        return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 }

@@ -113,7 +113,7 @@ export default function Home() {
     const [syncingAll, setSyncingAll] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [editingSettings, setEditingSettings] = useState({
-        defaultPaidBy: "",
+        defaultPaidBy: "none",
         defaultType: "shared",
         defaultSplitType: "equal",
     });
@@ -195,7 +195,7 @@ export default function Home() {
             if (data.success && data.settings) {
                 setSettings(data.settings);
                 setEditingSettings({
-                    defaultPaidBy: data.settings.defaultPaidBy || "",
+                    defaultPaidBy: data.settings.defaultPaidBy || "none",
                     defaultType: data.settings.defaultType,
                     defaultSplitType: data.settings.defaultSplitType || "equal",
                 });
@@ -256,24 +256,53 @@ export default function Home() {
     };
 
     const deleteBankConnection = async (id: string) => {
-        if (!confirm("Are you sure you want to delete this bank connection?"))
-            return;
-
         try {
-            await fetch(`/api/bank-connections?id=${id}`, { method: "DELETE" });
-            await fetchBankConnections();
-            await fetchTransactions();
+            const response = await fetch(`/api/bank-connections?id=${id}`, {
+                method: "DELETE",
+            });
+
+            if (response.ok) {
+                await fetchBankConnections();
+                await fetchTransactions();
+                toast({
+                    title: "Success",
+                    description: "Bank connection deleted successfully",
+                });
+            } else {
+                const errorData = await response.json();
+                toast({
+                    title: "Error",
+                    description:
+                        errorData.error || "Failed to delete bank connection",
+                    type: "error",
+                });
+            }
         } catch (error) {
             console.error("Error deleting bank connection:", error);
+            toast({
+                title: "Error",
+                description:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to delete bank connection",
+                type: "error",
+            });
         }
     };
 
     const saveSettings = async () => {
         try {
+            const settingsToSave = {
+                ...editingSettings,
+                defaultPaidBy:
+                    editingSettings.defaultPaidBy === "none"
+                        ? null
+                        : editingSettings.defaultPaidBy,
+            };
             const response = await fetch("/api/settings", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(editingSettings),
+                body: JSON.stringify(settingsToSave),
             });
 
             const data = await response.json();
@@ -567,7 +596,9 @@ export default function Home() {
                                         <SelectValue placeholder="None" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="">None</SelectItem>
+                                        <SelectItem value="none">
+                                            None
+                                        </SelectItem>
                                         {users.map((user) => (
                                             <SelectItem
                                                 key={user.id}

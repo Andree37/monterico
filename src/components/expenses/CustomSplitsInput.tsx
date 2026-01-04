@@ -52,8 +52,7 @@ export default function CustomSplitsInput({
             }));
             onSplitsChange(newSplits);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [totalAmount, users.length, splitType]);
+    }, [totalAmount, users, splitType, onSplitsChange]);
 
     const handleSplitChange = (userId: string, amount: number) => {
         const newSplits = splits.map((split) =>

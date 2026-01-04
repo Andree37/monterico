@@ -147,10 +147,6 @@ export default function SettingsPage() {
     };
 
     const handleDeleteUser = async (userId: string) => {
-        if (!confirm("Are you sure you want to remove this user?")) {
-            return;
-        }
-
         setSaving(true);
         try {
             const response = await fetch(`/api/users?id=${userId}`, {
@@ -161,13 +157,14 @@ export default function SettingsPage() {
                 await loadData();
                 toast({
                     title: "Success",
-                    description: "User removed successfully",
+                    description: "User deactivated successfully",
                     type: "success",
                 });
             } else {
+                const errorData = await response.json();
                 toast({
                     title: "Error",
-                    description: "Failed to delete user",
+                    description: errorData.error || "Failed to deactivate user",
                     type: "error",
                 });
             }
@@ -175,7 +172,10 @@ export default function SettingsPage() {
             console.error("Error deleting user:", error);
             toast({
                 title: "Error",
-                description: "Failed to delete user",
+                description:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to deactivate user",
                 type: "error",
             });
         } finally {
@@ -423,15 +423,17 @@ export default function SettingsPage() {
                                                 ? "Active"
                                                 : "Inactive"}
                                         </button>
-                                        <button
-                                            onClick={() =>
-                                                handleDeleteUser(user.id)
-                                            }
-                                            className="p-2 text-red-600 hover:bg-red-50 rounded"
-                                            title="Remove member"
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </button>
+                                        {user.isActive && (
+                                            <button
+                                                onClick={() =>
+                                                    handleDeleteUser(user.id)
+                                                }
+                                                className="p-2 text-red-600 hover:bg-red-50 rounded"
+                                                title="Deactivate member"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             </div>
