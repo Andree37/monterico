@@ -88,7 +88,6 @@ export async function POST(request: NextRequest) {
                 allocated,
                 spent: 0,
                 remaining: allocated,
-                saved: 0,
             },
             include: {
                 user: true,
@@ -209,8 +208,7 @@ export async function PATCH(request: NextRequest) {
             );
         }
 
-        // Save the remaining amount
-        const saved = allowance.remaining > 0 ? allowance.remaining : 0;
+        const carriedTo = allowance.remaining > 0 ? allowance.remaining : 0;
 
         const updatedAllowance = await prisma.personalAllowance.update({
             where: {
@@ -220,7 +218,7 @@ export async function PATCH(request: NextRequest) {
                 },
             },
             data: {
-                saved,
+                carriedTo,
             },
             include: {
                 user: true,
@@ -230,7 +228,7 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({
             success: true,
             allowance: updatedAllowance,
-            savedAmount: saved,
+            carriedToNextMonth: carriedTo,
         });
     } catch (error: unknown) {
         console.error("Error rolling over allowance:", error);
