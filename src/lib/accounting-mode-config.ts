@@ -13,13 +13,11 @@ export interface ModeConfig {
     displayName: string;
     description: string;
 
-    // API endpoints
     endpoints: {
         expenses: string;
         income: string;
     };
 
-    // Feature flags
     features: {
         expenseSplits: boolean;
         personalAllowances: boolean;
@@ -29,7 +27,6 @@ export interface ModeConfig {
         userRatios: boolean;
     };
 
-    // UI Configuration
     ui: {
         showSplitTypeSelector: boolean;
         showPaidFromPoolCheckbox: boolean;
@@ -39,7 +36,6 @@ export interface ModeConfig {
         expenseListComponent: "individual" | "shared-pool";
     };
 
-    // Expense form fields
     expenseForm: {
         requiredFields: string[];
         optionalFields: string[];
@@ -182,14 +178,12 @@ export function validateExpenseData(
     const config = getModeConfig(mode);
     const errors: string[] = [];
 
-    // Check required fields
     config.expenseForm.requiredFields.forEach((field) => {
         if (!data[field]) {
             errors.push(`${field} is required`);
         }
     });
 
-    // Mode-specific validations
     if (mode === "individual") {
         if (data.type === "shared" && data.splitType === "custom") {
             if (

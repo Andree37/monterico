@@ -106,7 +106,6 @@ export default function IndividualExpensesPage() {
         splitType: "equal" as "equal" | "ratio" | "custom",
     });
 
-    // Redirect if wrong mode
     useEffect(() => {
         if (!modeLoading && accountingMode !== "individual") {
             router.replace("/expenses/shared-pool");
@@ -121,7 +120,6 @@ export default function IndividualExpensesPage() {
         }
     }, [accountingMode]);
 
-    // Initialize custom splits when users or amount changes
     useEffect(() => {
         if (users.length > 0 && formData.amount) {
             const amount = parseFloat(formData.amount) || 0;
@@ -150,7 +148,6 @@ export default function IndividualExpensesPage() {
         }
     }, [users, formData.amount, formData.splitType]);
 
-    // Set default paidBy when users are loaded
     useEffect(() => {
         if (users.length > 0 && !formData.paidById) {
             const activeUser = users.find((u) => u.isActive);
@@ -318,7 +315,6 @@ export default function IndividualExpensesPage() {
         return yearMatch && monthMatch && categoryMatch;
     });
 
-    // Generate last 12 months for filtering
     const now = new Date();
     const generatedMonths = [];
     for (let i = 0; i < 12; i++) {

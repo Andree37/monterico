@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import {
-    getModeConfig,
     getEndpoint,
     isFeatureEnabled,
     shouldShowUIElement,
@@ -22,17 +21,10 @@ export function useAccountingMode() {
         useState<AccountingMode>("individual");
     const [loading, setLoading] = useState(true);
     const [settings, setSettings] = useState<Settings | null>(null);
-    const [config, setConfig] = useState<ModeConfig | null>(null);
 
     useEffect(() => {
         loadSettings();
     }, []);
-
-    useEffect(() => {
-        if (accountingMode) {
-            setConfig(getModeConfig(accountingMode));
-        }
-    }, [accountingMode]);
 
     const loadSettings = async () => {
         try {
@@ -76,7 +68,6 @@ export function useAccountingMode() {
         accountingMode,
         settings,
         loading,
-        config,
         getExpenseEndpoint,
         getIncomeEndpoint,
         isSharedPool,

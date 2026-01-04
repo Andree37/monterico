@@ -102,7 +102,6 @@ export default function SharedPoolExpensesPage() {
         type: "shared",
     });
 
-    // Redirect if wrong mode
     useEffect(() => {
         if (!modeLoading && accountingMode !== "shared_pool") {
             router.replace("/expenses/individual");
@@ -118,7 +117,6 @@ export default function SharedPoolExpensesPage() {
         }
     }, [accountingMode]);
 
-    // Set default paidBy when users are loaded
     useEffect(() => {
         if (users.length > 0 && !formData.paidById) {
             const activeUser = users.find((u) => u.isActive);
@@ -206,8 +204,6 @@ export default function SharedPoolExpensesPage() {
             if (data.success) {
                 await fetchExpenses();
                 setShowAddDialog(false);
-
-                // Refresh shared pool summary
                 setPoolRefreshKey((prev) => prev + 1);
 
                 if (data.warning) {
@@ -267,7 +263,6 @@ export default function SharedPoolExpensesPage() {
         return yearMatch && monthMatch && categoryMatch;
     });
 
-    // Generate last 12 months for filtering
     const now = new Date();
     const generatedMonths = [];
     for (let i = 0; i < 12; i++) {
@@ -313,7 +308,6 @@ export default function SharedPoolExpensesPage() {
 
     const activeUsers = users.filter((u) => u.isActive);
 
-    // Calculate stats for shared pool
     const calculateStats = () => {
         const poolSpent = filteredExpenses
             .filter((e) => e.type === "shared" && e.paidFromPool)
