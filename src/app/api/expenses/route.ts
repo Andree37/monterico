@@ -104,7 +104,6 @@ export async function POST(request: NextRequest) {
             },
         });
 
-        // If a transactionId was provided, link it to the expense
         if (transactionId) {
             await prisma.transaction.updateMany({
                 where: { transactionId: transactionId },
@@ -132,7 +131,6 @@ export async function PUT(request: NextRequest) {
         const body = await request.json();
         const { id, paid } = body;
 
-        // Update expense and all its splits to the same paid status
         await prisma.expense.update({
             where: { id },
             data: { paid },
@@ -147,13 +145,11 @@ export async function PUT(request: NextRequest) {
             },
         });
 
-        // Update all splits to match the expense paid status
         await prisma.expenseSplit.updateMany({
             where: { expenseId: id },
             data: { paid },
         });
 
-        // Fetch updated expense with updated splits
         const updatedExpense = await prisma.expense.findUnique({
             where: { id },
             include: {

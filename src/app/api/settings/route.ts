@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { processIncomeForSharedPool } from "@/lib/accounting/shared-pool";
 
 export async function GET() {
     try {
@@ -13,6 +14,7 @@ export async function GET() {
                     defaultPaidBy: null,
                     defaultType: "shared",
                     defaultSplitType: "equal",
+                    accountingMode: "individual",
                 },
             });
         }
@@ -32,10 +34,12 @@ export async function GET() {
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { defaultPaidBy, defaultType, defaultSplitType } = body;
+        const { defaultPaidBy, defaultType, defaultSplitType, accountingMode } =
+            body;
 
         // Get existing settings or create if none exist
         let settings = await prisma.settings.findFirst();
+        const previousMode = settings?.accountingMode || "individual";
 
         if (settings) {
             // Update existing settings
@@ -49,6 +53,7 @@ export async function POST(request: NextRequest) {
                     defaultType: defaultType || settings.defaultType,
                     defaultSplitType:
                         defaultSplitType || settings.defaultSplitType,
+                    accountingMode: accountingMode || settings.accountingMode,
                 },
             });
         } else {
@@ -58,14 +63,46 @@ export async function POST(request: NextRequest) {
                     defaultPaidBy: defaultPaidBy || null,
                     defaultType: defaultType || "shared",
                     defaultSplitType: defaultSplitType || "equal",
+                    accountingMode: accountingMode || "individual",
                 },
             });
         }
 
-        return NextResponse.json({
+        // Initialize shared pool if switching from individual to shared_pool
+        if (previousMode === "individual" && accountingMode === "shared_pool") {
+            // Get all existing income and process it through the pool
+            const allIncome = await prisma.income.findMany({
+                orderBy: { date: "asc" },
+            });
+
+            for (const income of allIncome) {
+                await processIncomeForSharedPool(
+                    income.userId,
+                    income.amount,
+                    new Date(income.date),
+                    income.allocatedToMonth || undefined,
+                );
+            }
+        }
+
+        const response: {
+            success: boolean;
+            settings: typeof settings;
+            message?: string;
+            poolInitialized?: boolean;
+        } = {
             success: true,
             settings,
-        });
+        };
+
+        // Add message if pool was initialized
+        if (previousMode === "individual" && accountingMode === "shared_pool") {
+            response.message =
+                "Shared pool initialized with existing income data";
+            response.poolInitialized = true;
+        }
+
+        return NextResponse.json(response);
     } catch (error: unknown) {
         console.error("Error saving settings:", error);
         const message =

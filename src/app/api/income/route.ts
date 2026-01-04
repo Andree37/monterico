@@ -72,7 +72,16 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { id, userId, date, description, amount, currency, type } = body;
+        const {
+            id,
+            userId,
+            date,
+            description,
+            amount,
+            currency,
+            type,
+            allocatedToMonth,
+        } = body;
 
         if (!userId || !date || !amount || !type) {
             return NextResponse.json(
@@ -90,6 +99,7 @@ export async function POST(request: NextRequest) {
                 data: {
                     userId,
                     date: new Date(date),
+                    allocatedToMonth: allocatedToMonth || null,
                     description: description || `${type} - ${date.slice(0, 7)}`,
                     amount: parseFloat(amount),
                     currency: currency || "EUR",
@@ -110,6 +120,7 @@ export async function POST(request: NextRequest) {
                 data: {
                     userId,
                     date: new Date(date),
+                    allocatedToMonth: allocatedToMonth || null,
                     description: description || `${type} - ${date.slice(0, 7)}`,
                     amount: parseFloat(amount),
                     currency: currency || "EUR",

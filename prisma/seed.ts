@@ -98,31 +98,73 @@ async function main() {
 
     console.log("Created categories");
 
-    // Create sample income for the last 6 months for each user
+    // Create sample income for last 3 months (so they allocate to the next month)
     const now = new Date();
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
+    const incomeMonths = [];
+    for (let i = 3; i >= 1; i--) {
         const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        months.push(date);
+        incomeMonths.push(date);
     }
+    const months = incomeMonths;
 
     for (const month of months) {
-        for (let i = 0; i < users.length; i++) {
-            const user = users[i];
-            await prisma.income.create({
-                data: {
-                    userId: user.id,
-                    date: month.toISOString(),
-                    description: `Salario - ${month.toLocaleDateString("pt-PT", { month: "long", year: "numeric" })}`,
-                    type: "Salario",
-                    amount: 3000 + i * 500, // Vary income by user
-                    currency: "EUR",
-                },
-            });
-        }
+        // Rita's salary on the 22nd (allocated to next month)
+        const ritaSalaryDate = new Date(
+            month.getFullYear(),
+            month.getMonth(),
+            22,
+        );
+        const ritaSalaryMonth = new Date(
+            month.getFullYear(),
+            month.getMonth() + 1,
+            1,
+        );
+
+        await prisma.income.create({
+            data: {
+                userId: users[1].id, // Rita
+                date: ritaSalaryDate.toISOString(),
+                allocatedToMonth: `${ritaSalaryMonth.getFullYear()}-${String(ritaSalaryMonth.getMonth() + 1).padStart(2, "0")}`,
+                description: `Salario - ${ritaSalaryMonth.toLocaleDateString("pt-PT", { month: "long", year: "numeric" })}`,
+                type: "Salario",
+                amount: 2000,
+                currency: "EUR",
+            },
+        });
+
+        // Andre's salary on the 27th (allocated to next month)
+        const andreSalaryDate = new Date(
+            month.getFullYear(),
+            month.getMonth(),
+            27,
+        );
+        const andreSalaryMonth = new Date(
+            month.getFullYear(),
+            month.getMonth() + 1,
+            1,
+        );
+
+        await prisma.income.create({
+            data: {
+                userId: users[0].id, // Andre
+                date: andreSalaryDate.toISOString(),
+                allocatedToMonth: `${andreSalaryMonth.getFullYear()}-${String(andreSalaryMonth.getMonth() + 1).padStart(2, "0")}`,
+                description: `Salario - ${andreSalaryMonth.toLocaleDateString("pt-PT", { month: "long", year: "numeric" })}`,
+                type: "Salario",
+                amount: 6000,
+                currency: "EUR",
+            },
+        });
     }
 
     console.log("Created sample income");
+
+    // Create sample expenses for last 3 months
+    const expenseMonths = [];
+    for (let i = 2; i >= 0; i--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        expenseMonths.push(date);
+    }
 
     // Create sample expenses
     const comidaCategory = await prisma.category.findFirst({
@@ -210,7 +252,7 @@ async function main() {
         },
     ];
 
-    for (const month of months) {
+    for (const month of expenseMonths) {
         for (const template of expenseTemplates) {
             if (!template.category) continue;
 

@@ -13,10 +13,14 @@ model User {
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
-    bankConnections BankConnection[]
-    expenses        Expense[]
-    expenseSplits   ExpenseSplit[]
-    incomes         Income[]
+    bankConnections     BankConnection[]
+    expenses            Expense[]
+    expenseSplits       ExpenseSplit[]
+    incomes             Income[]
+    personalAllowances  PersonalAllowance[]
+    reimbursements      Reimbursement[]
+    userSplitRatio      UserSplitRatio?
+    userAllowanceConfig UserAllowanceConfig?
 }
 
 model BankConnection {
@@ -103,27 +107,32 @@ model Category {
 }
 
 model Expense {
-    id          String   @id @default(uuid())
-    date        DateTime
-    description String
-    categoryId  String
-    amount      Float
-    currency    String   @default("EUR")
-    paidById    String
-    type        String   @default("shared")
-    paid        Boolean  @default(false)
-    createdAt   DateTime @default(now())
-    updatedAt   DateTime @updatedAt
+    id                 String   @id @default(uuid())
+    date               DateTime
+    description        String
+    categoryId         String
+    amount             Float
+    currency           String   @default("EUR")
+    paidById           String
+    type               String   @default("shared")
+    paid               Boolean  @default(false)
+    paidFromPool       Boolean  @default(false)
+    needsReimbursement Boolean  @default(false)
+    reimbursementId    String?
+    createdAt          DateTime @default(now())
+    updatedAt          DateTime @updatedAt
 
-    category     Category       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-    paidBy       User           @relation(fields: [paidById], references: [id], onDelete: Cascade)
-    splits       ExpenseSplit[]
-    transactions Transaction[]
+    category      Category       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+    paidBy        User           @relation(fields: [paidById], references: [id], onDelete: Cascade)
+    splits        ExpenseSplit[]
+    transactions  Transaction[]
+    reimbursement Reimbursement? @relation(fields: [reimbursementId], references: [id], onDelete: SetNull)
 
     @@index([date])
     @@index([categoryId])
     @@index([paidById])
     @@index([type])
+    @@index([reimbursementId])
 }
 
 model ExpenseSplit {
@@ -144,15 +153,16 @@ model ExpenseSplit {
 }
 
 model Income {
-    id          String   @id @default(uuid())
-    userId      String
-    date        DateTime
-    description String
-    amount      Float
-    currency    String   @default("EUR")
-    type        String
-    createdAt   DateTime @default(now())
-    updatedAt   DateTime @updatedAt
+    id               String   @id @default(uuid())
+    userId           String
+    date             DateTime
+    allocatedToMonth String?
+    description      String
+    amount           Float
+    currency         String   @default("EUR")
+    type             String
+    createdAt        DateTime @default(now())
+    updatedAt        DateTime @updatedAt
 
     user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
     transactions Transaction[]
@@ -160,6 +170,7 @@ model Income {
     @@index([userId])
     @@index([date])
     @@index([type])
+    @@index([allocatedToMonth])
 }
 
 model Settings {
@@ -167,6 +178,7 @@ model Settings {
     defaultPaidBy    String?
     defaultType      String   @default("shared")
     defaultSplitType String   @default("equal")
+    accountingMode   String   @default("individual")
     createdAt        DateTime @default(now())
     updatedAt        DateTime @updatedAt
 }
@@ -179,6 +191,68 @@ model UserSplitRatio {
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
     @@index([userId])
     @@index([isActive])
+}
+
+model UserAllowanceConfig {
+    id        String   @id @default(uuid())
+    userId    String   @unique
+    type      String   @default("percentage")
+    value     Float
+    isActive  Boolean  @default(true)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
+    @@index([isActive])
+}
+
+model PoolBalance {
+    id        String   @id @default(uuid())
+    balance   Float    @default(0)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+}
+
+model PersonalAllowance {
+    id          String   @id @default(uuid())
+    userId      String
+    month       String
+    allocated   Float    @default(0)
+    spent       Float    @default(0)
+    remaining   Float    @default(0)
+    carriedOver Float    @default(0)
+    carriedTo   Float    @default(0)
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([userId, month])
+    @@index([userId])
+    @@index([month])
+}
+
+model Reimbursement {
+    id          String    @id @default(uuid())
+    userId      String
+    month       String
+    amount      Float
+    description String
+    settled     Boolean   @default(false)
+    settledAt   DateTime?
+    createdAt   DateTime  @default(now())
+    updatedAt   DateTime  @updatedAt
+
+    user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    expenses Expense[]
+
+    @@index([userId])
+    @@index([month])
+    @@index([settled])
 }
