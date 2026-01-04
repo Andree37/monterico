@@ -915,7 +915,7 @@ export default function ExpensesPage() {
                                     ) {
                                         return (
                                             <div className="p-3 bg-muted/50 rounded text-center text-muted-foreground">
-                                                All settled up! 🎉
+                                                All settled up!
                                             </div>
                                         );
                                     }

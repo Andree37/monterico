@@ -165,16 +165,13 @@ export default function SummaryCards({
                         <p
                             className={`text-2xl font-bold ${totalSaved >= 0 ? "text-green-700" : "text-red-700"}`}
                         >
-                            {totalSaved >= 0 ? "✅ " : "⚠️ "}
                             {formatCurrency(totalSaved / monthCount)}
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
                             {overallSavingsRate.toFixed(1)}% savings rate
                         </p>
                         <p className="text-xs font-medium mt-2">
-                            {totalSaved >= 0
-                                ? "💰 Winning!"
-                                : "📉 Losing Money"}
+                            {totalSaved >= 0 ? "Winning!" : "Losing Money"}
                         </p>
                     </CardContent>
                 </Card>
@@ -254,8 +251,8 @@ export default function SummaryCards({
                                     </p>
                                     <p className="text-xs font-medium mt-1">
                                         {monthlySaved >= 0
-                                            ? "✅ Winning"
-                                            : "⚠️ Losing"}
+                                            ? "Winning"
+                                            : "Losing"}
                                     </p>
                                 </div>
                             </CardContent>

@@ -462,7 +462,7 @@ export default function SettingsPage() {
                         </div>
                         {totalRatio !== 1.0 && (
                             <p className="text-sm text-muted-foreground mt-2">
-                                ⚠️ Ratios should sum to 1.0 for accurate splits
+                                Ratios should sum to 1.0 for accurate splits
                             </p>
                         )}
                     </div>
