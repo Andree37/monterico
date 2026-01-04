@@ -30,7 +30,11 @@ type ToasterState = {
 const listeners: Array<(state: ToasterState) => void> = [];
 let memoryState: ToasterState = { toasts: [] };
 
-function dispatch(action: { type: string; toast?: ToasterToast }) {
+function dispatch(action: {
+    type: string;
+    toast?: ToasterToast;
+    toastId?: string;
+}) {
     if (action.type === "ADD_TOAST") {
         const toast = action.toast!;
         memoryState = {
@@ -39,13 +43,21 @@ function dispatch(action: { type: string; toast?: ToasterToast }) {
     }
 
     if (action.type === "REMOVE_TOAST") {
+        const toastId = action.toastId || action.toast?.id;
         memoryState = {
-            toasts: memoryState.toasts.filter((t) => t.id !== action.toast!.id),
+            toasts: memoryState.toasts.filter((t) => t.id !== toastId),
         };
     }
 
     listeners.forEach((listener) => {
         listener(memoryState);
+    });
+}
+
+function dismiss(toastId: string) {
+    dispatch({
+        type: "REMOVE_TOAST",
+        toastId,
     });
 }
 
@@ -106,5 +118,6 @@ export function useToast() {
     return {
         ...state,
         toast,
+        dismiss,
     };
 }

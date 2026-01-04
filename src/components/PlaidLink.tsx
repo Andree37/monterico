@@ -11,11 +11,7 @@ interface PlaidLinkProps {
     onExit?: () => void;
 }
 
-export function PlaidLink({
-    userId = "default_user",
-    onSuccess,
-    onExit,
-}: PlaidLinkProps) {
+export function PlaidLink({ userId, onSuccess, onExit }: PlaidLinkProps) {
     const [linkToken, setLinkToken] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [shouldOpen, setShouldOpen] = useState(false);

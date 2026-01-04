@@ -98,11 +98,17 @@ async function main() {
 
     console.log("Created categories");
 
-    // Create sample income for last 3 months (so they allocate to the next month)
+    // Create sample income for last 3 months and next 2 months (so they allocate to the next month)
     const now = new Date();
     const incomeMonths = [];
+    // Past 3 months
     for (let i = 3; i >= 1; i--) {
         const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        incomeMonths.push(date);
+    }
+    // Current month and next 2 months
+    for (let i = 0; i <= 2; i++) {
+        const date = new Date(now.getFullYear(), now.getMonth() + i, 1);
         incomeMonths.push(date);
     }
     const months = incomeMonths;

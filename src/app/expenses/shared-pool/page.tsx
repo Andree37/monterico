@@ -26,7 +26,14 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2, ArrowLeft, Settings, Receipt } from "lucide-react";
+import {
+    Plus,
+    Loader2,
+    ArrowLeft,
+    Settings,
+    Receipt,
+    DollarSign,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatCurrency } from "@/lib/utils";
@@ -86,10 +93,16 @@ export default function SharedPoolExpensesPage() {
     const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddDialog, setShowAddDialog] = useState(false);
-    const [selectedMonth, setSelectedMonth] = useState<string>("all");
-    const [selectedYear, setSelectedYear] = useState<string>(
-        new Date().getFullYear().toString(),
-    );
+    const getCurrentYearMonth = () => {
+        const now = new Date();
+        return {
+            year: now.getFullYear().toString(),
+            month: String(now.getMonth() + 1).padStart(2, "0"),
+        };
+    };
+    const { year: currentYear, month: currentMonth } = getCurrentYearMonth();
+    const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth);
+    const [selectedYear, setSelectedYear] = useState<string>(currentYear);
     const [selectedCategory, setSelectedCategory] = useState<string>("all");
     const [paidFromPool, setPaidFromPool] = useState(false);
     const [poolRefreshKey, setPoolRefreshKey] = useState<number>(0);
@@ -256,8 +269,7 @@ export default function SharedPoolExpensesPage() {
         const [expenseYear, expenseMonth] = expenseMonthKey.split("-");
 
         const yearMatch = expenseYear === selectedYear;
-        const monthMatch =
-            selectedMonth === "all" || expenseMonth === selectedMonth;
+        const monthMatch = expenseMonth === selectedMonth;
         const categoryMatch =
             selectedCategory === "all" || exp.category.id === selectedCategory;
         return yearMatch && monthMatch && categoryMatch;
@@ -305,6 +317,15 @@ export default function SharedPoolExpensesPage() {
         "November",
         "December",
     ];
+
+    const getFormattedPeriod = () => {
+        const monthIndex = parseInt(selectedMonth) - 1;
+        return `${monthNames[monthIndex]} ${selectedYear}`;
+    };
+
+    const getSelectedMonthKey = () => {
+        return `${selectedYear}-${selectedMonth}`;
+    };
 
     const activeUsers = users.filter((u) => u.isActive);
 
@@ -369,6 +390,12 @@ export default function SharedPoolExpensesPage() {
                 </div>
 
                 <div className="flex gap-2">
+                    <Link href="/income/shared-pool">
+                        <Button variant="outline">
+                            <DollarSign className="mr-2 h-4 w-4" />
+                            Income
+                        </Button>
+                    </Link>
                     <Link href="/reimbursements">
                         <Button variant="outline">
                             <Receipt className="mr-2 h-4 w-4" />
@@ -567,6 +594,88 @@ export default function SharedPoolExpensesPage() {
                 </div>
             </div>
 
+            <Card className="bg-linear-to-r from-blue-50 to-indigo-50 border-blue-200">
+                <CardHeader className="pb-4">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                            <CardTitle className="text-lg">
+                                Viewing: {getFormattedPeriod()}
+                            </CardTitle>
+                            <p className="text-sm text-muted-foreground mt-1">
+                                Select a period to view pool data and expenses
+                            </p>
+                        </div>
+                        <div className="flex gap-3">
+                            <div>
+                                <Label className="block mb-2 text-xs">
+                                    Year
+                                </Label>
+                                <Select
+                                    value={selectedYear}
+                                    onValueChange={(value) => {
+                                        setSelectedYear(value);
+                                        const monthsInNewYear = availableMonths
+                                            .filter((m) => m.startsWith(value))
+                                            .map((m) => m.split("-")[1]);
+                                        if (
+                                            !monthsInNewYear.includes(
+                                                selectedMonth,
+                                            )
+                                        ) {
+                                            setSelectedMonth(
+                                                monthsInNewYear[0] ||
+                                                    currentMonth,
+                                            );
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger className="w-32">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {availableYears.map((year) => (
+                                            <SelectItem key={year} value={year}>
+                                                {year}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div>
+                                <Label className="block mb-2 text-xs">
+                                    Month
+                                </Label>
+                                <Select
+                                    value={selectedMonth}
+                                    onValueChange={setSelectedMonth}
+                                >
+                                    <SelectTrigger className="w-40">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {availableMonthsInYear.map(
+                                            (monthNum) => {
+                                                const monthIndex =
+                                                    parseInt(monthNum) - 1;
+                                                return (
+                                                    <SelectItem
+                                                        key={monthNum}
+                                                        value={monthNum}
+                                                    >
+                                                        {monthNames[monthIndex]}
+                                                    </SelectItem>
+                                                );
+                                            },
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </div>
+                </CardHeader>
+            </Card>
+
             <Tabs defaultValue="overview" className="space-y-6">
                 <TabsList>
                     <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -574,7 +683,10 @@ export default function SharedPoolExpensesPage() {
                 </TabsList>
 
                 <TabsContent value="overview" className="space-y-6">
-                    <SharedPoolSummary key={poolRefreshKey} />
+                    <SharedPoolSummary
+                        key={`${poolRefreshKey}-${getSelectedMonthKey()}`}
+                        month={getSelectedMonthKey()}
+                    />
 
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                         <Card>
@@ -619,57 +731,6 @@ export default function SharedPoolExpensesPage() {
 
                 <TabsContent value="expenses" className="space-y-6">
                     <div className="flex gap-4 flex-wrap">
-                        <div>
-                            <Label className="block mb-2">Year</Label>
-                            <Select
-                                value={selectedYear}
-                                onValueChange={(value) => {
-                                    setSelectedYear(value);
-                                    setSelectedMonth("all");
-                                }}
-                            >
-                                <SelectTrigger className="w-32">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {availableYears.map((year) => (
-                                        <SelectItem key={year} value={year}>
-                                            {year}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div>
-                            <Label className="block mb-2">Month</Label>
-                            <Select
-                                value={selectedMonth}
-                                onValueChange={setSelectedMonth}
-                            >
-                                <SelectTrigger className="w-40">
-                                    <SelectValue placeholder="All Months" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">
-                                        All Months
-                                    </SelectItem>
-                                    {availableMonthsInYear.map((monthNum) => {
-                                        const monthIndex =
-                                            parseInt(monthNum) - 1;
-                                        return (
-                                            <SelectItem
-                                                key={monthNum}
-                                                value={monthNum}
-                                            >
-                                                {monthNames[monthIndex]}
-                                            </SelectItem>
-                                        );
-                                    })}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
                         <div>
                             <Label className="block mb-2">Category</Label>
                             <Select

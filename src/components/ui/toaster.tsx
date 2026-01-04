@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 export function Toaster() {
-    const { toasts } = useToast();
+    const { toasts, dismiss } = useToast();
 
     const getIcon = (type: string) => {
         switch (type) {
@@ -63,9 +63,7 @@ export function Toaster() {
                         )}
                     </div>
                     <button
-                        onClick={() => {
-                            // Auto-dismiss is handled by timeout
-                        }}
+                        onClick={() => dismiss(toast.id)}
                         className="text-muted-foreground hover:text-foreground"
                     >
                         <X className="h-4 w-4" />

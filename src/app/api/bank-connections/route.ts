@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
     try {
-        const { searchParams } = new URL(request.url);
-        const userId = searchParams.get("userId") || "default_user";
-
         const bankConnections = await prisma.bankConnection.findMany({
-            where: { userId },
             include: {
                 accounts: {
                     select: {
@@ -37,6 +33,35 @@ export async function GET(request: NextRequest) {
         });
     } catch (error: unknown) {
         console.error("Error fetching bank connections:", error);
+        const message =
+            error instanceof Error ? error.message : "An error occurred";
+        return NextResponse.json({ error: message }, { status: 500 });
+    }
+}
+
+export async function PUT(request: NextRequest) {
+    try {
+        const body = await request.json();
+        const { id, userId } = body;
+
+        if (!id || !userId) {
+            return NextResponse.json(
+                { error: "Missing bank connection ID or user ID" },
+                { status: 400 },
+            );
+        }
+
+        const bankConnection = await prisma.bankConnection.update({
+            where: { id },
+            data: { userId },
+        });
+
+        return NextResponse.json({
+            success: true,
+            bankConnection,
+        });
+    } catch (error: unknown) {
+        console.error("Error updating bank connection:", error);
         const message =
             error instanceof Error ? error.message : "An error occurred";
         return NextResponse.json({ error: message }, { status: 500 });

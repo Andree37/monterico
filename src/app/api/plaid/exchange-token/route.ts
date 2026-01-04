@@ -5,7 +5,7 @@ import { CountryCode } from "plaid";
 
 export async function POST(request: NextRequest) {
     try {
-        const { publicToken, userId } = await request.json();
+        const { publicToken } = await request.json();
 
         if (!publicToken) {
             return NextResponse.json(
@@ -41,18 +41,9 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        const user = await prisma.user.upsert({
-            where: { id: userId || "default_user" },
-            update: {},
-            create: {
-                id: userId || "default_user",
-                name: "Default User",
-            },
-        });
-
         const bankConnection = await prisma.bankConnection.create({
             data: {
-                userId: user.id,
+                userId: undefined,
                 itemId: itemId,
                 accessToken: accessToken,
                 institutionId: institutionId || null,

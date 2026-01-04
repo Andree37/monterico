@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
                     update: {
                         date: new Date(tx.date),
                         name: tx.name,
-                        amount: tx.amount,
+                        amount: -tx.amount,
                         currency: tx.iso_currency_code || null,
                         category: tx.category ? tx.category.join(", ") : null,
                         pending: tx.pending,
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
                         transactionId: tx.transaction_id,
                         date: new Date(tx.date),
                         name: tx.name,
-                        amount: tx.amount,
+                        amount: -tx.amount,
                         currency: tx.iso_currency_code || null,
                         category: tx.category ? tx.category.join(", ") : null,
                         pending: tx.pending,
@@ -114,30 +114,12 @@ export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const bankConnectionId = searchParams.get("bankConnectionId");
-        const userId = searchParams.get("userId");
 
         let transactions;
 
         if (bankConnectionId) {
             transactions = await prisma.transaction.findMany({
                 where: { bankConnectionId },
-                include: {
-                    account: {
-                        select: {
-                            name: true,
-                            type: true,
-                        },
-                    },
-                },
-                orderBy: { date: "desc" },
-            });
-        } else if (userId) {
-            transactions = await prisma.transaction.findMany({
-                where: {
-                    bankConnection: {
-                        userId,
-                    },
-                },
                 include: {
                     account: {
                         select: {
@@ -154,10 +136,22 @@ export async function GET(request: NextRequest) {
                 orderBy: { date: "desc" },
             });
         } else {
-            return NextResponse.json(
-                { error: "Missing bankConnectionId or userId" },
-                { status: 400 },
-            );
+            transactions = await prisma.transaction.findMany({
+                include: {
+                    account: {
+                        select: {
+                            name: true,
+                            type: true,
+                        },
+                    },
+                    bankConnection: {
+                        select: {
+                            institutionName: true,
+                        },
+                    },
+                },
+                orderBy: { date: "desc" },
+            });
         }
 
         return NextResponse.json({
@@ -176,7 +170,13 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
     try {
         const body = await request.json();
-        const { transactionId, linkedToIncome, incomeId } = body;
+        const {
+            transactionId,
+            linkedToIncome,
+            incomeId,
+            linkedToExpense,
+            expenseId,
+        } = body;
 
         if (!transactionId) {
             return NextResponse.json(
@@ -185,12 +185,29 @@ export async function PUT(request: NextRequest) {
             );
         }
 
+        const updateData: {
+            linkedToIncome?: boolean;
+            incomeId?: string | null;
+            linkedToExpense?: boolean;
+            expenseId?: string | null;
+        } = {};
+
+        if (linkedToIncome !== undefined) {
+            updateData.linkedToIncome = linkedToIncome;
+        }
+        if (incomeId !== undefined) {
+            updateData.incomeId = incomeId;
+        }
+        if (linkedToExpense !== undefined) {
+            updateData.linkedToExpense = linkedToExpense;
+        }
+        if (expenseId !== undefined) {
+            updateData.expenseId = expenseId;
+        }
+
         const transaction = await prisma.transaction.updateMany({
             where: { transactionId },
-            data: {
-                linkedToIncome: linkedToIncome ?? false,
-                incomeId: incomeId || null,
-            },
+            data: updateData,
         });
 
         return NextResponse.json({

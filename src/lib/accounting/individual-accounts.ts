@@ -123,7 +123,7 @@ export async function createExpenseSplits(
         }));
 
         const activeUsers = usersWithRatios.filter(
-            (u) => u.userSplitRatio?.isActive !== false,
+            (u) => u.userSplitRatio && u.userSplitRatio.isActive === true,
         );
 
         if (activeUsers.length === 0) {
@@ -141,21 +141,41 @@ export async function createExpenseSplits(
                 paid: user.id === expense.paidById,
             }));
         } else if (splitType === "ratio") {
+            console.log("=== RATIO SPLIT DEBUG ===");
+            console.log(
+                "Active users:",
+                activeUsers.map((u) => ({
+                    id: u.id,
+                    name: u.name,
+                    ratio: u.userSplitRatio?.ratio,
+                })),
+            );
+
             const totalRatio = activeUsers.reduce(
                 (sum, user) => sum + (user.userSplitRatio?.ratio || 0),
                 0,
             );
 
+            console.log("Total ratio:", totalRatio);
+
             if (totalRatio === 0) {
                 return { success: false, error: "Total ratio is zero" };
             }
 
-            splits = activeUsers.map((user) => ({
-                userId: user.id,
-                amount:
-                    (amount * (user.userSplitRatio?.ratio || 0)) / totalRatio,
-                paid: user.id === expense.paidById,
-            }));
+            splits = activeUsers.map((user) => {
+                const userRatio = user.userSplitRatio?.ratio || 0;
+                const splitAmount = (amount * userRatio) / totalRatio;
+                console.log(
+                    `User ${user.name}: ratio=${userRatio}, amount=${splitAmount}`,
+                );
+                return {
+                    userId: user.id,
+                    amount: splitAmount,
+                    paid: user.id === expense.paidById,
+                };
+            });
+
+            console.log("Final splits:", splits);
         } else if (splitType === "custom" && customSplits) {
             splits = customSplits.map((split) => ({
                 userId: split.userId,

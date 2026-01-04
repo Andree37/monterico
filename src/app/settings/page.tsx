@@ -5,6 +5,13 @@ import { Trash2, Plus, Save, Users, Info } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 
 interface User {
     id: string;
@@ -677,30 +684,34 @@ export default function SettingsPage() {
                                                     <Label className="text-xs mb-1 block">
                                                         Type
                                                     </Label>
-                                                    <select
+                                                    <Select
                                                         value={displayType}
-                                                        onChange={(e) =>
+                                                        onValueChange={(
+                                                            value: string,
+                                                        ) =>
                                                             setEditingAllowance(
                                                                 {
                                                                     ...editingAllowance,
                                                                     [user.id]: {
-                                                                        type: e
-                                                                            .target
-                                                                            .value,
+                                                                        type: value,
                                                                         value: displayValue,
                                                                     },
                                                                 },
                                                             )
                                                         }
-                                                        className="w-full p-2 border rounded text-sm"
                                                     >
-                                                        <option value="percentage">
-                                                            Percentage
-                                                        </option>
-                                                        <option value="fixed">
-                                                            Fixed Amount
-                                                        </option>
-                                                    </select>
+                                                        <SelectTrigger className="h-9 text-sm">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="percentage">
+                                                                Percentage
+                                                            </SelectItem>
+                                                            <SelectItem value="fixed">
+                                                                Fixed Amount
+                                                            </SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
                                                 </div>
 
                                                 <div>
@@ -739,7 +750,7 @@ export default function SettingsPage() {
                                                                 },
                                                             )
                                                         }
-                                                        className="text-sm"
+                                                        className="h-9 text-sm"
                                                     />
                                                 </div>
                                             </div>
