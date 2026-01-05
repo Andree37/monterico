@@ -166,7 +166,7 @@ export async function processIncomeForSharedPool(
             month = allocatedToMonth;
         } else {
             const dayOfMonth = date.getDate();
-            if (dayOfMonth >= 24) {
+            if (dayOfMonth >= 22) {
                 month = getNextMonthFromDate(date);
             } else {
                 month = getMonthFromDate(date);

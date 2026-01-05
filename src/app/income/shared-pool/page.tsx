@@ -541,7 +541,7 @@ export default function SharedPoolIncomePage() {
                                     </Select>
                                     <p className="text-xs text-muted-foreground">
                                         Leave empty to auto-allocate: income
-                                        received on day 24+ goes to next month
+                                        received on day 22+ goes to next month
                                     </p>
                                 </div>
 

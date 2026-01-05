@@ -59,6 +59,7 @@ interface ImportData {
     isPersonal?: boolean;
     paidFromPool?: boolean;
     incomeType?: string;
+    allocatedToMonth?: string;
 }
 
 export default function TransactionsPage() {
@@ -211,6 +212,7 @@ export default function TransactionsPage() {
                         userId: data.paidById,
                         type: data.incomeType || "salary",
                         transactionId: transaction.transactionId,
+                        allocatedToMonth: data.allocatedToMonth || null,
                     }),
                 });
 
@@ -496,16 +498,15 @@ export default function TransactionsPage() {
                                                                     }
                                                                 >
                                                                     <SelectTrigger className="w-40">
-                                                                        <SelectValue placeholder="Payment Source" />
+                                                                        <SelectValue placeholder="Source" />
                                                                     </SelectTrigger>
                                                                     <SelectContent>
                                                                         <SelectItem value="pool">
-                                                                            Paid
-                                                                            from
+                                                                            From
                                                                             Pool
                                                                         </SelectItem>
                                                                         <SelectItem value="pending">
-                                                                            Needs
+                                                                            Pending
                                                                             Reimbursement
                                                                         </SelectItem>
                                                                     </SelectContent>
@@ -575,7 +576,7 @@ export default function TransactionsPage() {
                                                             }
                                                         >
                                                             <SelectTrigger className="w-32">
-                                                                <SelectValue placeholder="User" />
+                                                                <SelectValue placeholder="Paid by" />
                                                             </SelectTrigger>
                                                             <SelectContent>
                                                                 {activeUsers.map(
@@ -652,6 +653,95 @@ export default function TransactionsPage() {
                                                                 </SelectItem>
                                                             </SelectContent>
                                                         </Select>
+
+                                                        {accountingMode ===
+                                                            "shared_pool" &&
+                                                            importData[
+                                                                transaction
+                                                                    .transactionId
+                                                            ]?.incomeType ===
+                                                                "salary" && (
+                                                                <Select
+                                                                    value={
+                                                                        importData[
+                                                                            transaction
+                                                                                .transactionId
+                                                                        ]
+                                                                            ?.allocatedToMonth ||
+                                                                        ""
+                                                                    }
+                                                                    onValueChange={(
+                                                                        value,
+                                                                    ) =>
+                                                                        handleImportDataChange(
+                                                                            transaction.transactionId,
+                                                                            "allocatedToMonth",
+                                                                            value,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <SelectTrigger className="w-40">
+                                                                        <SelectValue placeholder="Month" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {(() => {
+                                                                            const months =
+                                                                                [];
+                                                                            const now =
+                                                                                new Date();
+                                                                            for (
+                                                                                let i =
+                                                                                    -1;
+                                                                                i <=
+                                                                                2;
+                                                                                i++
+                                                                            ) {
+                                                                                const date =
+                                                                                    new Date(
+                                                                                        now.getFullYear(),
+                                                                                        now.getMonth() +
+                                                                                            i,
+                                                                                        1,
+                                                                                    );
+                                                                                const year =
+                                                                                    date.getFullYear();
+                                                                                const month =
+                                                                                    String(
+                                                                                        date.getMonth() +
+                                                                                            1,
+                                                                                    ).padStart(
+                                                                                        2,
+                                                                                        "0",
+                                                                                    );
+                                                                                const monthKey = `${year}-${month}`;
+                                                                                const monthName =
+                                                                                    date.toLocaleDateString(
+                                                                                        "en-IE",
+                                                                                        {
+                                                                                            month: "short",
+                                                                                            year: "numeric",
+                                                                                        },
+                                                                                    );
+                                                                                months.push(
+                                                                                    <SelectItem
+                                                                                        key={
+                                                                                            monthKey
+                                                                                        }
+                                                                                        value={
+                                                                                            monthKey
+                                                                                        }
+                                                                                    >
+                                                                                        {
+                                                                                            monthName
+                                                                                        }
+                                                                                    </SelectItem>,
+                                                                                );
+                                                                            }
+                                                                            return months;
+                                                                        })()}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )}
 
                                                         <Select
                                                             value={
