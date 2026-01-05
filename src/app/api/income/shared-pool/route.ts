@@ -18,6 +18,7 @@ export async function POST(request: NextRequest) {
             currency,
             type,
             allocatedToMonth,
+            transactionId,
         } = body;
 
         if (!userId || !date || !amount || !type) {
@@ -125,6 +126,17 @@ export async function POST(request: NextRequest) {
                     { status: 500 },
                 );
             }
+        }
+
+        // Link transaction if transactionId is provided
+        if (transactionId) {
+            await prisma.transaction.updateMany({
+                where: { transactionId },
+                data: {
+                    linkedToIncome: true,
+                    incomeId: income.id,
+                },
+            });
         }
 
         return NextResponse.json({

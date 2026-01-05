@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
                 currency: currency || "EUR",
                 paidById,
                 type: type || "shared",
-                paid: false,
+                paid: type === "personal" ? true : false,
                 paidFromPool: paidFromPool || false,
                 needsReimbursement: false,
             },

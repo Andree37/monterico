@@ -3,11 +3,37 @@
 import { useAccountingMode } from "@/hooks/use-accounting-mode";
 import { AlertCircle, Wallet, Users } from "lucide-react";
 
-export function AccountingModeIndicator() {
+export function AccountingModeIndicator({
+    compact = false,
+}: {
+    compact?: boolean;
+}) {
     const { accountingMode, loading } = useAccountingMode();
 
     if (loading) {
         return null;
+    }
+
+    if (compact) {
+        if (accountingMode === "shared_pool") {
+            return (
+                <div className="bg-blue-50 border border-blue-200 rounded-md px-2.5 py-1.5 flex items-center gap-2">
+                    <Wallet className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                    <p className="text-xs font-medium text-blue-900 whitespace-nowrap">
+                        Shared Pool Mode
+                    </p>
+                </div>
+            );
+        }
+
+        return (
+            <div className="bg-purple-50 border border-purple-200 rounded-md px-2.5 py-1.5 flex items-center gap-2">
+                <Users className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                <p className="text-xs font-medium text-purple-900 whitespace-nowrap">
+                    Individual Accounts Mode
+                </p>
+            </div>
+        );
     }
 
     if (accountingMode === "shared_pool") {

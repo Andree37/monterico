@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
     getEndpoint,
     isFeatureEnabled,
@@ -22,11 +22,7 @@ export function useAccountingMode() {
     const [loading, setLoading] = useState(true);
     const [settings, setSettings] = useState<Settings | null>(null);
 
-    useEffect(() => {
-        loadSettings();
-    }, []);
-
-    const loadSettings = async () => {
+    const loadSettings = useCallback(async () => {
         try {
             const response = await fetch("/api/settings");
             if (response.ok) {
@@ -43,7 +39,28 @@ export function useAccountingMode() {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadSettings();
+
+        // Listen for settings changes
+        const handleSettingsChange = () => {
+            loadSettings();
+        };
+
+        window.addEventListener(
+            "accounting-mode-changed",
+            handleSettingsChange,
+        );
+
+        return () => {
+            window.removeEventListener(
+                "accounting-mode-changed",
+                handleSettingsChange,
+            );
+        };
+    }, [loadSettings]);
 
     const getExpenseEndpoint = () => {
         return getEndpoint(accountingMode, "expenses");

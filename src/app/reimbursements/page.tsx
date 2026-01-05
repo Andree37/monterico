@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import {
     Card,
     CardContent,
@@ -10,8 +10,7 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { ArrowLeft, CheckCircle2, XCircle, Wallet } from "lucide-react";
-import Link from "next/link";
+import { CheckCircle2, XCircle, Wallet } from "lucide-react";
 import { useAccountingMode } from "@/hooks/use-accounting-mode";
 import { AccountingModeWarning } from "@/components/AccountingModeIndicator";
 
@@ -55,11 +54,7 @@ export default function ReimbursementsPage() {
             }
         } catch (error) {
             console.error("Error loading reimbursements:", error);
-            toast({
-                title: "Error",
-                description: "Failed to load reimbursements",
-                type: "error",
-            });
+            toast.error("Failed to load reimbursements");
         } finally {
             setLoading(false);
         }
@@ -79,26 +74,14 @@ export default function ReimbursementsPage() {
 
             if (response.ok) {
                 await loadReimbursements();
-                toast({
-                    title: "Success",
-                    description: "Reimbursement marked as settled",
-                    type: "success",
-                });
+                toast.success("Reimbursement marked as settled");
             } else {
                 const data = await response.json();
-                toast({
-                    title: "Error",
-                    description: data.error || "Failed to settle reimbursement",
-                    type: "error",
-                });
+                toast.error(data.error || "Failed to settle reimbursement");
             }
         } catch (error) {
             console.error("Error settling reimbursement:", error);
-            toast({
-                title: "Error",
-                description: "An unexpected error occurred",
-                type: "error",
-            });
+            toast.error("An unexpected error occurred");
         } finally {
             setSettling(null);
         }
@@ -118,27 +101,14 @@ export default function ReimbursementsPage() {
 
             if (response.ok) {
                 await loadReimbursements();
-                toast({
-                    title: "Success",
-                    description: "Reimbursement marked as pending",
-                    type: "success",
-                });
+                toast.success("Reimbursement marked as pending");
             } else {
                 const data = await response.json();
-                toast({
-                    title: "Error",
-                    description:
-                        data.error || "Failed to unsettle reimbursement",
-                    type: "error",
-                });
+                toast.error(data.error || "Failed to unsettle reimbursement");
             }
         } catch (error) {
             console.error("Error unsettling reimbursement:", error);
-            toast({
-                title: "Error",
-                description: "An unexpected error occurred",
-                type: "error",
-            });
+            toast.error("An unexpected error occurred");
         } finally {
             setSettling(null);
         }
@@ -203,22 +173,6 @@ export default function ReimbursementsPage() {
     if (!isSharedPool()) {
         return (
             <div className="container mx-auto py-8 px-4 max-w-7xl">
-                <div className="flex items-center gap-4 mb-8">
-                    <Link href="/expenses">
-                        <Button variant="outline" size="icon">
-                            <ArrowLeft className="h-4 w-4" />
-                        </Button>
-                    </Link>
-                    <div>
-                        <h1 className="text-4xl font-bold tracking-tight">
-                            Reimbursements
-                        </h1>
-                        <p className="text-muted-foreground mt-2">
-                            Manage shared pool reimbursements
-                        </p>
-                    </div>
-                </div>
-
                 <AccountingModeWarning requiredMode="shared_pool" />
             </div>
         );
@@ -234,24 +188,6 @@ export default function ReimbursementsPage() {
 
     return (
         <div className="container mx-auto py-8 px-4 max-w-7xl">
-            <div className="flex items-center justify-between mb-8">
-                <div className="flex items-center gap-4">
-                    <Link href="/expenses">
-                        <Button variant="outline" size="icon">
-                            <ArrowLeft className="h-4 w-4" />
-                        </Button>
-                    </Link>
-                    <div>
-                        <h1 className="text-4xl font-bold tracking-tight">
-                            Reimbursements
-                        </h1>
-                        <p className="text-muted-foreground mt-2">
-                            Manage shared pool reimbursements
-                        </p>
-                    </div>
-                </div>
-            </div>
-
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <Card>
