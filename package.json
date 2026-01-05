@@ -4,6 +4,7 @@
     "private": true,
     "scripts": {
         "dev": "next dev",
+        "dev:https": "node server.js",
         "build": "next build",
         "start": "next start",
         "lint": "eslint"
@@ -20,6 +21,7 @@
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "dotenv": "^17.2.3",
+        "jsonwebtoken": "^9.0.2",
         "lucide-react": "^0.562.0",
         "next": "16.1.1",
         "next-themes": "^0.4.6",
@@ -35,6 +37,7 @@
     "devDependencies": {
         "@tailwindcss/postcss": "^4",
         "@types/better-sqlite3": "^7.6.13",
+        "@types/jsonwebtoken": "^9.0.5",
         "@types/node": "^20",
         "@types/react": "^19",
         "@types/react-dom": "^19",

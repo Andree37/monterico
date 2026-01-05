@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { PlaidLink } from "@/components/PlaidLink";
+import { EnableBankingLink } from "@/components/EnableBankingLink";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
@@ -43,6 +43,9 @@ export default function Home() {
     );
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState<string | null>(null);
+    const [refreshingBalance, setRefreshingBalance] = useState<string | null>(
+        null,
+    );
 
     const loadBankConnections = async () => {
         try {
@@ -69,15 +72,45 @@ export default function Home() {
         loadData();
     }, [loadData]);
 
-    const handlePlaidSuccess = async () => {
+    const handleEnableBankingSuccess = async () => {
         toast.success("Bank account connected successfully");
         await loadData();
+    };
+
+    const refreshBalance = async (connectionId: string, accountId: string) => {
+        setRefreshingBalance(accountId);
+        try {
+            const response = await fetch("/api/enablebanking/account-details", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    bankConnectionId: connectionId,
+                    accountId: accountId,
+                }),
+            });
+
+            if (response.ok) {
+                toast.success("Balance refreshed successfully");
+                await loadData();
+            } else {
+                const data = await response.json();
+                throw new Error(data.error || "Failed to refresh balance");
+            }
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to refresh balance",
+            );
+        } finally {
+            setRefreshingBalance(null);
+        }
     };
 
     const syncTransactions = async (connectionId: string) => {
         setSyncing(connectionId);
         try {
-            const response = await fetch("/api/plaid/transactions", {
+            const response = await fetch("/api/enablebanking/transactions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ bankConnectionId: connectionId }),
@@ -128,7 +161,9 @@ export default function Home() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <PlaidLink onSuccess={handlePlaidSuccess} />
+                        <EnableBankingLink
+                            onSuccess={handleEnableBankingSuccess}
+                        />
                     </CardContent>
                 </Card>
 
@@ -215,19 +250,43 @@ export default function Home() {
                                                         {account.subtype}
                                                     </p>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p className="font-semibold">
-                                                        €
-                                                        {account.currentBalance?.toFixed(
-                                                            2,
-                                                        ) || "0.00"}
-                                                    </p>
-                                                    <p className="text-sm text-muted-foreground">
-                                                        Available: €
-                                                        {account.availableBalance?.toFixed(
-                                                            2,
-                                                        ) || "0.00"}
-                                                    </p>
+                                                <div className="text-right flex items-center gap-2">
+                                                    <div>
+                                                        <p className="font-semibold">
+                                                            €
+                                                            {account.currentBalance?.toFixed(
+                                                                2,
+                                                            ) || "0.00"}
+                                                        </p>
+                                                        <p className="text-sm text-muted-foreground">
+                                                            Available: €
+                                                            {account.availableBalance?.toFixed(
+                                                                2,
+                                                            ) || "0.00"}
+                                                        </p>
+                                                    </div>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            refreshBalance(
+                                                                connection.id,
+                                                                account.id,
+                                                            )
+                                                        }
+                                                        disabled={
+                                                            refreshingBalance ===
+                                                            account.id
+                                                        }
+                                                        title="Refresh balance"
+                                                    >
+                                                        {refreshingBalance ===
+                                                        account.id ? (
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                        ) : (
+                                                            <RefreshCw className="h-4 w-4" />
+                                                        )}
+                                                    </Button>
                                                 </div>
                                             </div>
                                         ))}

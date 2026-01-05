@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files
 .env
+.env.local
+.env*.local
 
 # vercel
 .vercel
@@ -41,3 +43,13 @@ yarn-error.log*
 next-env.d.ts
 
 dev.db
+
+# Enable Banking keys (private keys - never commit!)
+keys/
+*.key
+*.pem
+*.crt
+*.csr
+
+# HTTPS certificates for local development
+certs/

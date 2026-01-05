@@ -66,7 +66,7 @@ model Transaction {
     id               String   @id @default(uuid())
     bankConnectionId String
     accountId        String
-    transactionId    String   @unique
+    transactionId    String
     date             DateTime
     name             String
     amount           Float
@@ -86,6 +86,7 @@ model Transaction {
     expense        Expense?       @relation(fields: [expenseId], references: [id], onDelete: SetNull)
     income         Income?        @relation(fields: [incomeId], references: [id], onDelete: SetNull)
 
+    @@unique([transactionId, accountId])
     @@index([bankConnectionId])
     @@index([accountId])
     @@index([date])

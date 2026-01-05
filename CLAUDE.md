@@ -5,6 +5,8 @@
 - Follow Next.js 14+ App Router conventions
 - Use shadcn/ui components whenever possible - never create custom UI components when shadcn equivalents exist
 - Maintain consistent code formatting and structure with the existing codebase
+- Do not create mardown or text files with summaries of changes at the end of conversations
+- Do not create custom shell scripts or automation tools at the end of conversations or to show feature or do something.
 
 ## UI/UX Rules
 1. **Always use shadcn/ui components** - Check the `/src/components/ui` directory first before creating any UI element
