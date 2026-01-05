@@ -40,7 +40,12 @@ export async function POST(request: NextRequest) {
         const storedTransactions = await Promise.all(
             response.data.transactions.map(async (tx) => {
                 return await prisma.transaction.upsert({
-                    where: { transactionId: tx.transaction_id },
+                    where: {
+                        transactionId_accountId: {
+                            transactionId: tx.transaction_id,
+                            accountId: tx.account_id,
+                        },
+                    },
                     update: {
                         date: new Date(tx.date),
                         name: tx.name,
