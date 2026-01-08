@@ -3,6 +3,10 @@ import { parse } from "url";
 import next from "next";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -24,7 +28,7 @@ try {
             cert: fs.readFileSync(certPath),
         };
     } else {
-        console.log("\n⚠️  HTTPS certificates not found!");
+        console.log("\nHTTPS certificates not found!");
         console.log("\nPlease generate certificates using mkcert:\n");
         console.log("  brew install mkcert");
         console.log("  mkcert -install");
@@ -51,6 +55,6 @@ app.prepare().then(() => {
         }
     }).listen(port, (err) => {
         if (err) throw err;
-        console.log(`\n✅ Ready on https://${hostname}:${port}\n`);
+        console.log(`\nReady on https://${hostname}:${port}\n`);
     });
 });

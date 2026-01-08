@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
     Card,
@@ -12,7 +12,7 @@ import {
 import { Loader2, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export default function CallbackPage() {
+function CallbackContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [status, setStatus] = useState<"loading" | "success" | "error">(
@@ -131,5 +131,26 @@ export default function CallbackPage() {
                 </CardContent>
             </Card>
         </div>
+    );
+}
+
+export default function CallbackPage() {
+    return (
+        <Suspense
+            fallback={
+                <div className="container mx-auto flex min-h-screen items-center justify-center p-4">
+                    <Card className="w-full max-w-md">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                                Loading...
+                            </CardTitle>
+                        </CardHeader>
+                    </Card>
+                </div>
+            }
+        >
+            <CallbackContent />
+        </Suspense>
     );
 }
