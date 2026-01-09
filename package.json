@@ -2,12 +2,21 @@
     "name": "monterico",
     "version": "0.1.0",
     "private": true,
+    "engines": {
+        "bun": ">=1.0.0",
+        "npm": "please-use-bun",
+        "yarn": "please-use-bun",
+        "pnpm": "please-use-bun"
+    },
     "scripts": {
         "dev": "next dev",
-        "dev:https": "node server.js",
+        "dev:https": "bun server.js",
         "build": "next build",
         "start": "next start",
         "lint": "eslint"
+    },
+    "prisma": {
+        "seed": "bun prisma/seed.ts"
     },
     "dependencies": {
         "@prisma/adapter-libsql": "^7.2.0",

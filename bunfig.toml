@@ -1,0 +1,20 @@
+[install]
+# Use bun's package manager
+registry = "https://registry.npmjs.org/"
+
+# Automatically install peer dependencies
+peer = true
+
+# Use exact versions (no ^ or ~)
+exact = false
+
+[install.lockfile]
+# Save lockfile
+save = true
+
+# Print lockfile
+print = "yarn"
+
+[test]
+# Use bun's test runner
+preload = []
