@@ -10,10 +10,14 @@
     },
     "scripts": {
         "dev": "next dev",
-        "dev:https": "bun server.js",
+        "dev:https": "DATABASE_URL=\"file:./prod.db\" bun server.js",
         "build": "next build",
         "start": "next start",
-        "lint": "eslint"
+        "lint": "eslint",
+        "db:migrate": "prisma migrate dev",
+        "db:seed": "bun prisma/seed.ts",
+        "db:seed:prod": "bun prisma/seed.prod.ts",
+        "db:studio": "prisma studio"
     },
     "prisma": {
         "seed": "bun prisma/seed.ts"

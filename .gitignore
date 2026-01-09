@@ -52,6 +52,7 @@ bun-debug.log*
 next-env.d.ts
 
 dev.db
+prod.db
 
 # Enable Banking keys (private keys - never commit!)
 keys/
