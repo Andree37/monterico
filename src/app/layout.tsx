@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { MainNav } from "@/components/MainNav";
+import { DatabaseIndicator } from "@/components/DatabaseIndicator";
 
 const geistSans = Geist({
     variable: "--font-geist-sans",
@@ -32,6 +33,7 @@ export default function RootLayout({
                 <MainNav />
                 <main className="min-h-screen bg-background">{children}</main>
                 <Toaster />
+                <DatabaseIndicator />
             </body>
         </html>
     );
