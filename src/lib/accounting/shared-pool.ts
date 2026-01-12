@@ -1,110 +1,103 @@
 import { prisma } from "@/lib/db";
 
-export function getCurrentMonth(): string {
+// Utility functions for date/month handling
+function getCurrentMonth(): string {
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
     return `${year}-${month}`;
 }
 
-export function getMonthFromDate(date: Date): string {
+function getMonthFromDate(date: Date): string {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
     return `${year}-${month}`;
 }
 
-export function getPreviousMonth(month: string): string {
-    const [year, monthNum] = month.split("-");
-    const date = new Date(parseInt(year), parseInt(monthNum) - 1, 1);
+function getPreviousMonth(monthStr: string): string {
+    const [year, month] = monthStr.split("-").map(Number);
+    const date = new Date(year, month - 1, 1);
     date.setMonth(date.getMonth() - 1);
     return getMonthFromDate(date);
 }
 
-export function getNextMonth(month: string): string {
-    const [year, monthNum] = month.split("-");
-    const date = new Date(parseInt(year), parseInt(monthNum) - 1, 1);
+function getNextMonth(monthStr: string): string {
+    const [year, month] = monthStr.split("-").map(Number);
+    const date = new Date(year, month - 1, 1);
     date.setMonth(date.getMonth() + 1);
     return getMonthFromDate(date);
 }
 
-export function getNextMonthFromDate(date: Date): string {
-    const nextMonthDate = new Date(date);
-    nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
-    return getMonthFromDate(nextMonthDate);
-}
+// Pure calculation functions - no state mutations
 
-export async function getPoolBalance(): Promise<{
-    id: string;
-    balance: number;
-}> {
-    let pool = await prisma.poolBalance.findFirst();
-
-    if (!pool) {
-        pool = await prisma.poolBalance.create({
-            data: {
-                balance: 0,
-            },
-        });
-    }
-
-    return pool;
-}
-
-async function calculateAllowances(totalIncome: number): Promise<{
-    allowances: Array<{ userId: string; amount: number }>;
+/**
+ * Calculate how much each user should get from an income amount
+ */
+async function calculateAllowanceDistribution(
+    totalIncome: number,
+    userId: string,
+): Promise<{
+    allowances: Array<{
+        householdMemberId: string;
+        memberName: string | null;
+        amount: number;
+    }>;
     totalAllocated: number;
     remainingForPool: number;
 }> {
-    let configs = await prisma.userAllowanceConfig.findMany({
-        where: { isActive: true },
+    const configs = await prisma.householdMemberAllowanceConfig.findMany({
+        where: {
+            isActive: true,
+            householdMember: {
+                userId: userId,
+            },
+        },
+        include: {
+            householdMember: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+        },
     });
 
     if (configs.length === 0) {
-        const users = await prisma.user.findMany();
-        if (users.length > 0) {
-            await Promise.all(
-                users.map((u) =>
-                    prisma.userAllowanceConfig.create({
-                        data: {
-                            userId: u.id,
-                            type: "percentage",
-                            value: 0.2,
-                            isActive: true,
-                        },
-                    }),
-                ),
-            );
-            configs = await prisma.userAllowanceConfig.findMany({
-                where: { isActive: true },
-            });
-        } else {
-            return {
-                allowances: [],
-                totalAllocated: 0,
-                remainingForPool: totalIncome,
-            };
-        }
+        return {
+            allowances: [],
+            totalAllocated: 0,
+            remainingForPool: totalIncome,
+        };
     }
 
     const percentageConfigs = configs.filter((c) => c.type === "percentage");
     const fixedConfigs = configs.filter((c) => c.type === "fixed");
 
     let totalAllocated = 0;
-    const allowances: Array<{ userId: string; amount: number }> = [];
+    const allowances: Array<{
+        householdMemberId: string;
+        memberName: string | null;
+        amount: number;
+    }> = [];
 
+    // First allocate fixed amounts
     for (const config of fixedConfigs) {
+        const amount = config.value;
         allowances.push({
-            userId: config.userId,
-            amount: config.value,
+            householdMemberId: config.householdMemberId,
+            memberName: config.householdMember.name,
+            amount,
         });
-        totalAllocated += config.value;
+        totalAllocated += amount;
     }
 
+    // Then allocate percentages from remaining amount
     const remainingAfterFixed = totalIncome - totalAllocated;
     for (const config of percentageConfigs) {
         const amount = remainingAfterFixed * config.value;
         allowances.push({
-            userId: config.userId,
+            householdMemberId: config.householdMemberId,
+            memberName: config.householdMember.name,
             amount,
         });
         totalAllocated += amount;
@@ -117,258 +110,502 @@ async function calculateAllowances(totalIncome: number): Promise<{
     };
 }
 
-async function processCarryover(
-    userId: string,
+/**
+ * Calculate total personal allowance allocated for a household member in a month
+ */
+async function calculatePersonalAllowanceAllocated(
+    householdMemberId: string,
     month: string,
+    userId: string,
 ): Promise<number> {
-    const previousMonth = getPreviousMonth(month);
-    const prevAllowance = await prisma.personalAllowance.findUnique({
+    const incomes = await prisma.income.findMany({
         where: {
-            userId_month: {
-                userId,
-                month: previousMonth,
+            userId,
+            allocatedToMonth: month,
+        },
+    });
+
+    const config = await prisma.householdMemberAllowanceConfig.findUnique({
+        where: { householdMemberId },
+    });
+
+    if (!config || !config.isActive) {
+        return 0;
+    }
+
+    let totalAllocated = 0;
+
+    for (const income of incomes) {
+        const distribution = await calculateAllowanceDistribution(
+            income.amount,
+            userId,
+        );
+        const memberAllowance = distribution.allowances.find(
+            (a) => a.householdMemberId === householdMemberId,
+        );
+        if (memberAllowance) {
+            totalAllocated += memberAllowance.amount;
+        }
+    }
+
+    return totalAllocated;
+}
+
+/**
+ * Calculate total personal allowance spent by a household member in a month
+ */
+async function calculatePersonalAllowanceSpent(
+    householdMemberId: string,
+    month: string,
+    userId: string,
+): Promise<number> {
+    const expenses = await prisma.expense.findMany({
+        where: {
+            userId,
+            paidById: householdMemberId,
+            type: "personal",
+            date: {
+                gte: new Date(`${month}-01`),
+                lte: new Date(`${month}-31`),
             },
         },
     });
 
-    if (!prevAllowance) {
-        return 0;
-    }
-
-    const carryover = prevAllowance.remaining;
-
-    if (carryover !== 0) {
-        await prisma.personalAllowance.update({
-            where: {
-                userId_month: {
-                    userId,
-                    month: previousMonth,
-                },
-            },
-            data: {
-                carriedTo: carryover,
-            },
-        });
-    }
-
-    return carryover;
+    return expenses.reduce((sum, expense) => sum + expense.amount, 0);
 }
 
-export async function processIncomeForSharedPool(
-    userId: string,
-    amount: number,
-    date: Date,
-    allocatedToMonth?: string,
-): Promise<{ success: boolean; error?: string }> {
-    try {
-        let month: string;
-        if (allocatedToMonth) {
-            month = allocatedToMonth;
-        } else {
-            const dayOfMonth = date.getDate();
-            if (dayOfMonth >= 22) {
-                month = getNextMonthFromDate(date);
-            } else {
-                month = getMonthFromDate(date);
-            }
-        }
-
-        const { allowances, remainingForPool } =
-            await calculateAllowances(amount);
-
-        if (allowances.length === 0) {
-            return {
-                success: false,
-                error: "No active user allowance configurations found",
-            };
-        }
-
-        const pool = await getPoolBalance();
-        await prisma.poolBalance.update({
-            where: { id: pool.id },
-            data: {
-                balance: pool.balance + remainingForPool,
-            },
-        });
-
-        await Promise.all(
-            allowances.map(async (allowance) => {
-                const carryover = await processCarryover(
-                    allowance.userId,
-                    month,
-                );
-
-                const existing = await prisma.personalAllowance.findUnique({
-                    where: {
-                        userId_month: {
-                            userId: allowance.userId,
-                            month,
-                        },
-                    },
-                });
-
-                if (existing) {
-                    const newAllocated = existing.allocated + allowance.amount;
-                    const newRemaining = existing.remaining + allowance.amount;
-
-                    await prisma.personalAllowance.update({
-                        where: {
-                            userId_month: {
-                                userId: allowance.userId,
-                                month,
-                            },
-                        },
-                        data: {
-                            allocated: newAllocated,
-                            remaining: newRemaining,
-                        },
-                    });
-                } else {
-                    const totalRemaining = allowance.amount + carryover;
-
-                    await prisma.personalAllowance.create({
-                        data: {
-                            userId: allowance.userId,
-                            month,
-                            allocated: allowance.amount,
-                            spent: 0,
-                            remaining: totalRemaining,
-                            carriedOver: carryover,
-                            carriedTo: 0,
-                        },
-                    });
-                }
-            }),
-        );
-
-        return { success: true };
-    } catch (error) {
-        console.error("Error processing income for shared pool:", error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error",
-        };
-    }
-}
-
-export async function deductFromSharedPool(
-    expenseId: string,
-    amount: number,
-    _month: string,
-): Promise<{ success: boolean; error?: string }> {
-    try {
-        const pool = await getPoolBalance();
-
-        if (pool.balance < amount) {
-            return {
-                success: false,
-                error: `Insufficient pool balance. Available: €${pool.balance.toFixed(2)}, Required: €${amount.toFixed(2)}`,
-            };
-        }
-
-        await prisma.poolBalance.update({
-            where: { id: pool.id },
-            data: {
-                balance: pool.balance - amount,
-            },
-        });
-
-        await prisma.expense.update({
-            where: { id: expenseId },
-            data: {
-                paidFromPool: true,
-                needsReimbursement: false,
-            },
-        });
-
-        return { success: true };
-    } catch (error) {
-        console.error("Error deducting from shared pool:", error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error",
-        };
-    }
-}
-
-export async function deductFromPersonalAllowance(
-    userId: string,
-    amount: number,
+/**
+ * Calculate carryover from previous month for a household member
+ */
+async function calculateCarryover(
+    householdMemberId: string,
     month: string,
-): Promise<{ success: boolean; warning?: string; error?: string }> {
-    try {
-        let allowance = await prisma.personalAllowance.findUnique({
-            where: {
-                userId_month: {
-                    userId,
-                    month,
-                },
-            },
-        });
+    userId: string,
+): Promise<number> {
+    const previousMonth = getPreviousMonth(month);
 
-        if (!allowance) {
-            const carryover = await processCarryover(userId, month);
+    const previousAllocated = await calculatePersonalAllowanceAllocated(
+        householdMemberId,
+        previousMonth,
+        userId,
+    );
+    const previousSpent = await calculatePersonalAllowanceSpent(
+        householdMemberId,
+        previousMonth,
+        userId,
+    );
 
-            allowance = await prisma.personalAllowance.create({
-                data: {
-                    userId,
-                    month,
-                    allocated: 0,
-                    spent: 0,
-                    remaining: carryover,
-                    carriedOver: carryover,
-                    carriedTo: 0,
-                },
-            });
-        }
-
-        const newSpent = allowance.spent + amount;
-        const newRemaining = allowance.remaining - amount;
-
-        await prisma.personalAllowance.update({
-            where: {
-                userId_month: {
-                    userId,
-                    month,
-                },
-            },
-            data: {
-                spent: newSpent,
-                remaining: newRemaining,
-            },
-        });
-
-        if (newRemaining < 0) {
-            return {
-                success: true,
-                warning: `Personal allowance exceeded by €${Math.abs(newRemaining).toFixed(2)}`,
-            };
-        }
-
-        return { success: true };
-    } catch (error) {
-        console.error("Error deducting from personal allowance:", error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error",
-        };
-    }
+    const carryover = previousAllocated - previousSpent;
+    return carryover > 0 ? carryover : 0;
 }
 
+/**
+ * Calculate the current pool balance
+ */
+export async function calculatePoolBalance(userId: string): Promise<number> {
+    // Get all income
+    const incomes = await prisma.income.findMany({
+        where: { userId },
+    });
+    const totalIncome = incomes.reduce((sum, income) => sum + income.amount, 0);
+
+    // Get all personal allowances allocated
+    let totalPersonalAllocated = 0;
+    for (const income of incomes) {
+        const distribution = await calculateAllowanceDistribution(
+            income.amount,
+            userId,
+        );
+        totalPersonalAllocated += distribution.totalAllocated;
+    }
+
+    // Get all expenses paid from pool
+    const poolExpenses = await prisma.expense.findMany({
+        where: {
+            userId,
+            paidFromPool: true,
+        },
+    });
+    const totalPoolExpenses = poolExpenses.reduce(
+        (sum, expense) => sum + expense.amount,
+        0,
+    );
+
+    return totalIncome - totalPersonalAllocated - totalPoolExpenses;
+}
+
+/**
+ * Calculate pool balance for a specific month
+ */
+export async function calculatePoolBalanceForMonth(
+    month: string,
+    userId: string,
+): Promise<number> {
+    // Get income allocated to this month
+    const incomes = await prisma.income.findMany({
+        where: {
+            userId,
+            allocatedToMonth: month,
+        },
+    });
+    const totalIncome = incomes.reduce((sum, income) => sum + income.amount, 0);
+
+    // Get personal allowances for this month
+    let totalPersonalAllocated = 0;
+    for (const income of incomes) {
+        const distribution = await calculateAllowanceDistribution(
+            income.amount,
+            userId,
+        );
+        totalPersonalAllocated += distribution.totalAllocated;
+    }
+
+    // Get expenses paid from pool in this month
+    const [year, monthNum] = month.split("-").map(Number);
+    const startOfMonth = new Date(year, monthNum - 1, 1);
+    const endOfMonth = new Date(year, monthNum, 0, 23, 59, 59);
+
+    const poolExpenses = await prisma.expense.findMany({
+        where: {
+            userId,
+            paidFromPool: true,
+            date: {
+                gte: startOfMonth,
+                lte: endOfMonth,
+            },
+        },
+    });
+    const totalPoolExpenses = poolExpenses.reduce(
+        (sum, expense) => sum + expense.amount,
+        0,
+    );
+
+    return totalIncome - totalPersonalAllocated - totalPoolExpenses;
+}
+
+/**
+ * Get comprehensive shared pool summary for a specific month
+ */
+export async function getSharedPoolSummary(
+    month: string,
+    userId: string,
+): Promise<{
+    month: string;
+    // Monthly metrics
+    totalIncome: number;
+    totalPoolExpenses: number;
+    totalPersonalExpenses: number;
+    poolBalance: number;
+    amountToPool: number;
+    amountToAllowances: number;
+    // Cumulative metrics
+    cumulativePoolBalance: number;
+    cumulativeTotalPoolSpent: number;
+    cumulativeTotalAllowancesAllocated: number;
+    cumulativeTotalAllowancesSpent: number;
+    memberAllowances: Array<{
+        householdMemberId: string;
+        memberName: string | null;
+        allocated: number;
+        spent: number;
+        remaining: number;
+        carriedOver: number;
+        carriedTo: number;
+        cumulativeAllocated: number;
+        cumulativeSpent: number;
+        cumulativeSaved: number;
+    }>;
+    pendingReimbursements: Array<{
+        id: string;
+        householdMemberId: string;
+        memberName: string | null;
+        amount: number;
+        description: string;
+        settled: boolean;
+        month: string;
+    }>;
+}> {
+    // Get all income for this month (scoped to user)
+    const incomes = await prisma.income.findMany({
+        where: {
+            userId,
+            allocatedToMonth: month,
+        },
+        include: {
+            user: {
+                select: {
+                    id: true,
+                },
+            },
+            householdMember: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+        },
+    });
+
+    const totalIncome = incomes.reduce((sum, income) => sum + income.amount, 0);
+
+    // Get expenses for this month
+    const [year, monthNum] = month.split("-").map(Number);
+    const startOfMonth = new Date(year, monthNum - 1, 1);
+    const endOfMonth = new Date(year, monthNum, 0, 23, 59, 59);
+
+    const expenses = await prisma.expense.findMany({
+        where: {
+            userId,
+            date: {
+                gte: startOfMonth,
+                lte: endOfMonth,
+            },
+        },
+        include: {
+            paidBy: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+        },
+    });
+
+    const poolExpenses = expenses.filter((e) => e.paidFromPool);
+    const personalExpenses = expenses.filter((e) => e.type === "personal");
+
+    const totalPoolExpenses = poolExpenses.reduce(
+        (sum, expense) => sum + expense.amount,
+        0,
+    );
+    const totalPersonalExpenses = personalExpenses.reduce(
+        (sum, expense) => sum + expense.amount,
+        0,
+    );
+
+    // Calculate household member allowances
+    const members = await prisma.householdMember.findMany({
+        where: { userId },
+        include: {
+            allowanceConfig: {
+                where: {
+                    isActive: true,
+                },
+            },
+        },
+    });
+
+    const memberAllowances = await Promise.all(
+        members
+            .filter((m) => m.allowanceConfig)
+            .map(async (member) => {
+                const allocated = await calculatePersonalAllowanceAllocated(
+                    member.id,
+                    month,
+                    userId,
+                );
+                const spent = await calculatePersonalAllowanceSpent(
+                    member.id,
+                    month,
+                    userId,
+                );
+                const carriedOver = await calculateCarryover(
+                    member.id,
+                    month,
+                    userId,
+                );
+                const remaining = allocated + carriedOver - spent;
+
+                // Calculate carryover to next month
+                const nextMonth = getNextMonth(month);
+                const nextMonthSpent = await calculatePersonalAllowanceSpent(
+                    member.id,
+                    nextMonth,
+                    userId,
+                );
+                const carriedTo =
+                    remaining > 0 ? Math.min(remaining, nextMonthSpent) : 0;
+
+                return {
+                    householdMemberId: member.id,
+                    memberName: member.name,
+                    allocated,
+                    spent,
+                    remaining,
+                    carriedOver,
+                    carriedTo,
+                };
+            }),
+    );
+
+    // Get pending reimbursements
+    const reimbursements = await prisma.reimbursement.findMany({
+        where: {
+            userId,
+            month,
+        },
+        include: {
+            householdMember: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+        },
+    });
+
+    const pendingReimbursements = reimbursements.map((r) => ({
+        id: r.id,
+        householdMemberId: r.householdMemberId,
+        memberName: r.householdMember.name,
+        amount: r.amount,
+        description: r.description,
+        settled: r.settled,
+        month: r.month,
+    }));
+
+    const poolBalance = await calculatePoolBalanceForMonth(month, userId);
+
+    // Calculate cumulative metrics
+    const cumulativePoolBalance = await calculatePoolBalance(userId);
+
+    // Calculate all-time pool expenses
+    const allPoolExpenses = await prisma.expense.findMany({
+        where: {
+            userId,
+            paidFromPool: true,
+        },
+    });
+    const cumulativeTotalPoolSpent = allPoolExpenses.reduce(
+        (sum, expense) => sum + expense.amount,
+        0,
+    );
+
+    // Calculate total allowances allocated to pool this month
+    const amountToAllowances = memberAllowances.reduce(
+        (sum, a) => sum + a.allocated,
+        0,
+    );
+    const amountToPool = totalIncome - amountToAllowances;
+
+    // Calculate cumulative allowances metrics
+    const allIncomes = await prisma.income.findMany({
+        where: { userId },
+    });
+
+    let cumulativeTotalAllowancesAllocated = 0;
+    for (const income of allIncomes) {
+        const distribution = await calculateAllowanceDistribution(
+            income.amount,
+            userId,
+        );
+        cumulativeTotalAllowancesAllocated += distribution.totalAllocated;
+    }
+
+    // Calculate cumulative spent for each member
+    const allPersonalExpenses = await prisma.expense.findMany({
+        where: {
+            userId,
+            type: "personal",
+        },
+    });
+    const cumulativeTotalAllowancesSpent = allPersonalExpenses.reduce(
+        (sum, expense) => sum + expense.amount,
+        0,
+    );
+
+    // Add cumulative data to member allowances
+    const memberAllowancesWithCumulative = await Promise.all(
+        memberAllowances.map(async (allowance) => {
+            // Calculate cumulative allocated for this member
+            let cumulativeAllocated = 0;
+            for (const income of allIncomes) {
+                const distribution = await calculateAllowanceDistribution(
+                    income.amount,
+                    userId,
+                );
+                const memberAllowance = distribution.allowances.find(
+                    (a) => a.householdMemberId === allowance.householdMemberId,
+                );
+                if (memberAllowance) {
+                    cumulativeAllocated += memberAllowance.amount;
+                }
+            }
+
+            // Calculate cumulative spent for this member
+            const memberExpenses = allPersonalExpenses.filter(
+                (e) => e.paidById === allowance.householdMemberId,
+            );
+            const cumulativeSpent = memberExpenses.reduce(
+                (sum, expense) => sum + expense.amount,
+                0,
+            );
+
+            const cumulativeSaved = cumulativeAllocated - cumulativeSpent;
+
+            return {
+                ...allowance,
+                cumulativeAllocated,
+                cumulativeSpent,
+                cumulativeSaved,
+            };
+        }),
+    );
+
+    return {
+        month,
+        totalIncome,
+        totalPoolExpenses,
+        totalPersonalExpenses,
+        poolBalance,
+        amountToPool,
+        amountToAllowances,
+        cumulativePoolBalance,
+        cumulativeTotalPoolSpent,
+        cumulativeTotalAllowancesAllocated,
+        cumulativeTotalAllowancesSpent,
+        memberAllowances: memberAllowancesWithCumulative,
+        pendingReimbursements,
+    };
+}
+
+/**
+ * Create a reimbursement for an expense
+ */
 export async function createReimbursementForExpense(
     expenseId: string,
-    userId: string,
+    householdMemberId: string,
     amount: number,
-    description: string,
-    month: string,
-): Promise<{ success: boolean; reimbursementId?: string; error?: string }> {
+): Promise<{
+    success: boolean;
+    error?: string;
+    reimbursement?: {
+        id: string;
+        userId: string;
+        month: string;
+        amount: number;
+        description: string;
+        settled: boolean;
+    };
+}> {
     try {
+        const expense = await prisma.expense.findUnique({
+            where: { id: expenseId },
+        });
+
+        if (!expense) {
+            return { success: false, error: "Expense not found" };
+        }
+
+        const month = getMonthFromDate(expense.date);
+
         const reimbursement = await prisma.reimbursement.create({
             data: {
-                userId,
+                userId: expense.userId,
+                householdMemberId,
                 month,
                 amount,
-                description,
+                description: `Reimbursement for ${expense.description}`,
                 settled: false,
             },
         });
@@ -376,13 +613,12 @@ export async function createReimbursementForExpense(
         await prisma.expense.update({
             where: { id: expenseId },
             data: {
-                reimbursementId: reimbursement.id,
                 needsReimbursement: true,
-                paidFromPool: false,
+                reimbursementId: reimbursement.id,
             },
         });
 
-        return { success: true, reimbursementId: reimbursement.id };
+        return { success: true, reimbursement };
     } catch (error) {
         console.error("Error creating reimbursement:", error);
         return {
@@ -392,38 +628,13 @@ export async function createReimbursementForExpense(
     }
 }
 
+/**
+ * Settle a reimbursement
+ */
 export async function settleReimbursement(
     reimbursementId: string,
 ): Promise<{ success: boolean; error?: string }> {
     try {
-        const reimbursement = await prisma.reimbursement.findUnique({
-            where: { id: reimbursementId },
-        });
-
-        if (!reimbursement) {
-            return { success: false, error: "Reimbursement not found" };
-        }
-
-        if (reimbursement.settled) {
-            return { success: false, error: "Reimbursement already settled" };
-        }
-
-        const pool = await getPoolBalance();
-
-        if (pool.balance < reimbursement.amount) {
-            return {
-                success: false,
-                error: `Insufficient pool balance for reimbursement. Available: €${pool.balance.toFixed(2)}, Required: €${reimbursement.amount.toFixed(2)}`,
-            };
-        }
-
-        await prisma.poolBalance.update({
-            where: { id: pool.id },
-            data: {
-                balance: pool.balance - reimbursement.amount,
-            },
-        });
-
         await prisma.reimbursement.update({
             where: { id: reimbursementId },
             data: {
@@ -442,139 +653,46 @@ export async function settleReimbursement(
     }
 }
 
-export async function getSharedPoolSummary(month?: string): Promise<{
-    pool: {
-        balance: number;
-        totalIncomeThisMonth: number;
-        personalAllocationThisMonth: number;
-        totalPoolSpent: number;
-    };
-    allowances: Array<{
-        userId: string;
-        userName: string;
-        allocated: number;
-        spent: number;
-        remaining: number;
-        carriedOver: number;
-        carriedTo: number;
-    }>;
-    reimbursements: Array<{
-        id: string;
-        userId: string;
-        userName: string;
-        amount: number;
-        description: string;
-        settled: boolean;
-        month: string;
-    }>;
-    totalReimbursementsOwed: number;
+/**
+ * Get personal allowance details for a household member in a specific month
+ */
+export async function getPersonalAllowanceForMember(
+    householdMemberId: string,
+    month: string,
+    userId: string,
+): Promise<{
+    householdMemberId: string;
+    month: string;
+    allocated: number;
+    spent: number;
+    remaining: number;
+    carriedOver: number;
 }> {
-    try {
-        const currentMonth = month || getCurrentMonth();
+    const allocated = await calculatePersonalAllowanceAllocated(
+        householdMemberId,
+        month,
+        userId,
+    );
+    const spent = await calculatePersonalAllowanceSpent(
+        householdMemberId,
+        month,
+        userId,
+    );
+    const carriedOver = await calculateCarryover(
+        householdMemberId,
+        month,
+        userId,
+    );
+    const remaining = allocated + carriedOver - spent;
 
-        const pool = await getPoolBalance();
-
-        const incomes = await prisma.income.findMany({
-            where: {
-                OR: [
-                    {
-                        allocatedToMonth: currentMonth,
-                    },
-                    {
-                        allocatedToMonth: null,
-                        date: {
-                            gte: new Date(`${currentMonth}-01`),
-                            lt: new Date(
-                                new Date(`${currentMonth}-01`).getFullYear(),
-                                new Date(`${currentMonth}-01`).getMonth() + 1,
-                                1,
-                            ),
-                        },
-                    },
-                ],
-            },
-        });
-
-        const totalIncomeThisMonth = incomes.reduce(
-            (sum, i) => sum + i.amount,
-            0,
-        );
-
-        const allowances = await prisma.personalAllowance.findMany({
-            where: { month: currentMonth },
-            include: { user: true },
-        });
-
-        const personalAllocationThisMonth = allowances.reduce(
-            (sum, a) => sum + a.allocated,
-            0,
-        );
-
-        const reimbursements = await prisma.reimbursement.findMany({
-            where: { settled: false },
-            include: { user: true },
-            orderBy: { createdAt: "desc" },
-        });
-
-        const totalReimbursementsOwed = reimbursements.reduce(
-            (sum, r) => sum + r.amount,
-            0,
-        );
-
-        const expensesPaidFromPool = await prisma.expense.findMany({
-            where: {
-                type: "shared",
-                paidFromPool: true,
-            },
-        });
-
-        const settledReimbursements = await prisma.reimbursement.findMany({
-            where: { settled: true },
-        });
-
-        const totalPoolSpent =
-            expensesPaidFromPool.reduce((sum, e) => sum + e.amount, 0) +
-            settledReimbursements.reduce((sum, r) => sum + r.amount, 0);
-
-        return {
-            pool: {
-                balance: pool.balance,
-                totalIncomeThisMonth,
-                personalAllocationThisMonth,
-                totalPoolSpent,
-            },
-            allowances: allowances.map((a) => ({
-                userId: a.userId,
-                userName: a.user.name,
-                allocated: a.allocated,
-                spent: a.spent,
-                remaining: a.remaining,
-                carriedOver: a.carriedOver,
-                carriedTo: a.carriedTo,
-            })),
-            reimbursements: reimbursements.map((r) => ({
-                id: r.id,
-                userId: r.userId,
-                userName: r.user.name,
-                amount: r.amount,
-                description: r.description,
-                settled: r.settled,
-                month: r.month,
-            })),
-            totalReimbursementsOwed,
-        };
-    } catch (error) {
-        console.error("Error getting shared pool summary:", error);
-        return {
-            pool: {
-                balance: 0,
-                totalIncomeThisMonth: 0,
-                personalAllocationThisMonth: 0,
-                totalPoolSpent: 0,
-            },
-            allowances: [],
-            reimbursements: [],
-            totalReimbursementsOwed: 0,
-        };
-    }
+    return {
+        householdMemberId,
+        month,
+        allocated,
+        spent,
+        remaining,
+        carriedOver,
+    };
 }
+
+export { getCurrentMonth, getMonthFromDate, getPreviousMonth, getNextMonth };

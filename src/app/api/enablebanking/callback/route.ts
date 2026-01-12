@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
         });
 
         for (const account of accounts) {
-            const dbAccount = await prisma.account.create({
+            const dbAccount = await prisma.bankAccount.create({
                 data: {
                     bankConnectionId: bankConnection.id,
                     accountId: account.uid || "unknown",
@@ -174,7 +174,7 @@ export async function GET(request: NextRequest) {
                         : null;
 
                     // Update account with balance information
-                    await prisma.account.update({
+                    await prisma.bankAccount.update({
                         where: { id: dbAccount.id },
                         data: {
                             currentBalance: currentBalance,

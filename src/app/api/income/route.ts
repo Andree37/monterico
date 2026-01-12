@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
+import { auth } from "@/auth/config";
 
 export async function GET(request: NextRequest) {
     try {
@@ -17,25 +18,37 @@ export async function GET(request: NextRequest) {
         }
 
         if (month) {
-            // If month is provided (e.g., "2025-01"), filter by that month
-            const [year, monthNum] = month.split("-");
-            const startOfMonth = new Date(
-                parseInt(year),
-                parseInt(monthNum) - 1,
-                1,
-            );
-            const endOfMonth = new Date(
-                parseInt(year),
-                parseInt(monthNum),
-                0,
-                23,
-                59,
-                59,
-            );
-            where.date = {
-                gte: startOfMonth,
-                lte: endOfMonth,
-            };
+            // Filter by allocatedToMonth if set, otherwise by date
+            where.OR = [
+                {
+                    // Income with allocatedToMonth matching the requested month
+                    allocatedToMonth: month,
+                },
+                {
+                    // Income without allocatedToMonth, filter by date
+                    allocatedToMonth: null,
+                    date: (() => {
+                        const [year, monthNum] = month.split("-");
+                        const startOfMonth = new Date(
+                            parseInt(year),
+                            parseInt(monthNum) - 1,
+                            1,
+                        );
+                        const endOfMonth = new Date(
+                            parseInt(year),
+                            parseInt(monthNum),
+                            0,
+                            23,
+                            59,
+                            59,
+                        );
+                        return {
+                            gte: startOfMonth,
+                            lte: endOfMonth,
+                        };
+                    })(),
+                },
+            ];
         } else if (startDate && endDate) {
             where.date = {
                 gte: new Date(startDate),
@@ -47,6 +60,11 @@ export async function GET(request: NextRequest) {
             where,
             include: {
                 user: {
+                    select: {
+                        id: true,
+                    },
+                },
+                householdMember: {
                     select: {
                         id: true,
                         name: true,
@@ -71,10 +89,20 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
         const body = await request.json();
         const {
             id,
-            userId,
+            householdMemberId,
             date,
             description,
             amount,
@@ -84,9 +112,11 @@ export async function POST(request: NextRequest) {
             transactionId,
         } = body;
 
-        if (!userId || !date || !amount || !type) {
+        if (!householdMemberId || !date || !amount || !type) {
             return NextResponse.json(
-                { error: "Missing required fields" },
+                {
+                    error: "Missing required fields: householdMemberId, date, amount, type",
+                },
                 { status: 400 },
             );
         }
@@ -99,6 +129,7 @@ export async function POST(request: NextRequest) {
                 where: { id },
                 data: {
                     userId,
+                    householdMemberId,
                     date: new Date(date),
                     allocatedToMonth: allocatedToMonth || null,
                     description: description || `${type} - ${date.slice(0, 7)}`,
@@ -108,6 +139,11 @@ export async function POST(request: NextRequest) {
                 },
                 include: {
                     user: {
+                        select: {
+                            id: true,
+                        },
+                    },
+                    householdMember: {
                         select: {
                             id: true,
                             name: true,
@@ -120,6 +156,7 @@ export async function POST(request: NextRequest) {
             income = await prisma.income.create({
                 data: {
                     userId,
+                    householdMemberId,
                     date: new Date(date),
                     allocatedToMonth: allocatedToMonth || null,
                     description: description || `${type} - ${date.slice(0, 7)}`,
@@ -129,6 +166,11 @@ export async function POST(request: NextRequest) {
                 },
                 include: {
                     user: {
+                        select: {
+                            id: true,
+                        },
+                    },
+                    householdMember: {
                         select: {
                             id: true,
                             name: true,
@@ -163,6 +205,16 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
         const { searchParams } = new URL(request.url);
         const id = searchParams.get("id");
 
@@ -170,6 +222,25 @@ export async function DELETE(request: NextRequest) {
             return NextResponse.json(
                 { error: "Missing income ID" },
                 { status: 400 },
+            );
+        }
+
+        // Verify the income belongs to the current user
+        const income = await prisma.income.findUnique({
+            where: { id },
+        });
+
+        if (!income) {
+            return NextResponse.json(
+                { error: "Income not found" },
+                { status: 404 },
+            );
+        }
+
+        if (income.userId !== userId) {
+            return NextResponse.json(
+                { error: "Unauthorized to delete this income" },
+                { status: 403 },
             );
         }
 

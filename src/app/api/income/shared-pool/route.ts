@@ -1,17 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { processIncomeForSharedPool } from "@/lib/accounting/shared-pool";
+import { auth } from "@/auth/config";
 
 /**
  * POST - Create income in Shared Pool mode
- * This adds income to the shared pool and allocates personal allowances
+ * Just creates the income record - calculations happen at query time
  */
 export async function POST(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
         const body = await request.json();
         const {
             id,
-            userId,
+            householdMemberId,
             date,
             description,
             amount,
@@ -21,10 +31,10 @@ export async function POST(request: NextRequest) {
             transactionId,
         } = body;
 
-        if (!userId || !date || !amount || !type) {
+        if (!householdMemberId || !date || !amount || !type) {
             return NextResponse.json(
                 {
-                    error: "Missing required fields: userId, date, amount, type",
+                    error: "Missing required fields: householdMemberId, date, amount, type",
                 },
                 { status: 400 },
             );
@@ -36,24 +46,11 @@ export async function POST(request: NextRequest) {
 
         if (id) {
             // Update existing income
-            const existingIncome = await prisma.income.findUnique({
-                where: { id },
-            });
-
-            if (!existingIncome) {
-                return NextResponse.json(
-                    { error: "Income not found" },
-                    { status: 404 },
-                );
-            }
-
-            // Calculate difference to adjust pool
-            const difference = incomeAmount - existingIncome.amount;
-
             income = await prisma.income.update({
                 where: { id },
                 data: {
                     userId,
+                    householdMemberId,
                     date: incomeDate,
                     allocatedToMonth: allocatedToMonth || null,
                     description: description || `${type} - ${date.slice(0, 7)}`,
@@ -65,34 +62,22 @@ export async function POST(request: NextRequest) {
                     user: {
                         select: {
                             id: true,
+                        },
+                    },
+                    householdMember: {
+                        select: {
+                            id: true,
                             name: true,
                         },
                     },
                 },
             });
-
-            // Update shared pool with the difference
-            if (difference !== 0) {
-                const result = await processIncomeForSharedPool(
-                    userId,
-                    difference,
-                    incomeDate,
-                    allocatedToMonth,
-                );
-
-                if (!result.success) {
-                    return NextResponse.json({
-                        success: true,
-                        income,
-                        warning: `Income updated but pool not adjusted: ${result.error}`,
-                    });
-                }
-            }
         } else {
             // Create new income
             income = await prisma.income.create({
                 data: {
                     userId,
+                    householdMemberId,
                     date: incomeDate,
                     allocatedToMonth: allocatedToMonth || null,
                     description: description || `${type} - ${date.slice(0, 7)}`,
@@ -104,28 +89,16 @@ export async function POST(request: NextRequest) {
                     user: {
                         select: {
                             id: true,
+                        },
+                    },
+                    householdMember: {
+                        select: {
+                            id: true,
                             name: true,
                         },
                     },
                 },
             });
-
-            // Process income for shared pool
-            const result = await processIncomeForSharedPool(
-                userId,
-                incomeAmount,
-                incomeDate,
-                allocatedToMonth,
-            );
-
-            if (!result.success) {
-                return NextResponse.json(
-                    {
-                        error: `Income created but pool not updated: ${result.error}`,
-                    },
-                    { status: 500 },
-                );
-            }
         }
 
         // Link transaction if transactionId is provided

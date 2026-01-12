@@ -2,33 +2,20 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Wallet, DollarSign, AlertCircle } from "lucide-react";
-
-interface SharedPoolData {
-    balance: number;
-    totalIncomeThisMonth: number;
-    personalAllocationThisMonth: number;
-    totalPoolSpent: number;
-}
+import { Wallet, DollarSign } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
 
 interface PersonalAllowance {
-    userId: string;
-    userName: string;
+    householdMemberId: string;
+    memberName: string | null;
     allocated: number;
     spent: number;
     remaining: number;
     carriedOver: number;
     carriedTo: number;
-}
-
-interface Reimbursement {
-    id: string;
-    userId: string;
-    userName: string;
-    month: string;
-    amount: number;
-    description: string;
-    settled: boolean;
+    cumulativeAllocated: number;
+    cumulativeSpent: number;
+    cumulativeSaved: number;
 }
 
 interface SharedPoolSummaryProps {
@@ -41,10 +28,16 @@ export function SharedPoolSummary({
     refreshKey,
 }: SharedPoolSummaryProps) {
     const [loading, setLoading] = useState(true);
-    const [pool, setPool] = useState<SharedPoolData | null>(null);
+
+    // Monthly metrics
+    const [totalIncome, setTotalIncome] = useState(0);
+    const [totalPoolExpenses, setTotalPoolExpenses] = useState(0);
+    const [amountToPool, setAmountToPool] = useState(0);
+
+    // Cumulative metrics
+    const [cumulativePoolBalance, setCumulativePoolBalance] = useState(0);
+
     const [allowances, setAllowances] = useState<PersonalAllowance[]>([]);
-    const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
-    const [totalReimbursementsOwed, setTotalReimbursementsOwed] = useState(0);
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -54,10 +47,16 @@ export function SharedPoolSummary({
             const poolRes = await fetch(`/api/shared-pool?month=${monthParam}`);
             if (poolRes.ok) {
                 const data = await poolRes.json();
-                setPool(data.pool);
-                setAllowances(data.allowances || []);
-                setReimbursements(data.reimbursements || []);
-                setTotalReimbursementsOwed(data.totalReimbursementsOwed || 0);
+
+                // Monthly metrics
+                setTotalIncome(data.totalIncome || 0);
+                setTotalPoolExpenses(data.totalPoolExpenses || 0);
+                setAmountToPool(data.amountToPool || 0);
+
+                // Cumulative metrics
+                setCumulativePoolBalance(data.cumulativePoolBalance || 0);
+
+                setAllowances(data.memberAllowances || []);
             }
         } catch (error) {
             console.error("Error loading shared pool data:", error);
@@ -95,7 +94,7 @@ export function SharedPoolSummary({
 
     if (loading) {
         return (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-6">
                 <Card>
                     <CardContent className="p-6">
                         <p className="text-muted-foreground">Loading...</p>
@@ -105,366 +104,223 @@ export function SharedPoolSummary({
         );
     }
 
-    const hasIncomeThisMonth = pool && pool.totalIncomeThisMonth > 0;
-    const hasPoolData = pool !== null;
+    const monthlyPoolBalance = amountToPool - totalPoolExpenses;
+    const poolHealthPercentage =
+        amountToPool > 0
+            ? Math.max(
+                  0,
+                  Math.min(100, (monthlyPoolBalance / amountToPool) * 100),
+              )
+            : 100;
 
     return (
         <div className="space-y-6">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <div className="flex gap-2 items-start">
-                    <AlertCircle className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-                    <div className="text-xs text-blue-900">
-                        <p className="font-medium mb-1">Income Allocation</p>
-                        <p>
-                            Income received on day 24 onwards is automatically
-                            allocated to the next month. For example, salary
-                            received on Dec 25, 2025 is allocated to January
-                            2026 allowances.
+            {/* Combined Pool Overview */}
+            <div className="grid gap-4 md:grid-cols-2">
+                {/* Total Pool Balance */}
+                <Card className="border-2 border-blue-200 bg-blue-50/30">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-medium flex items-center gap-2">
+                            <Wallet className="h-4 w-4 text-blue-600" />
+                            Total Pool Balance
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-3xl font-bold text-blue-700">
+                            {formatCurrency(cumulativePoolBalance)}
+                        </div>
+                        <p className="text-xs text-blue-700/70 mt-1">
+                            Available for shared expenses
                         </p>
-                    </div>
-                </div>
-            </div>
+                    </CardContent>
+                </Card>
 
-            {!hasIncomeThisMonth && hasPoolData && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <p className="text-sm text-yellow-900">
-                        <strong>
-                            No income for{" "}
-                            {month ? formatMonth(month) : "this month"}.
-                        </strong>{" "}
-                        The pool balance shown is continuous across all months.
-                        Add income to set up personal allowances for this month.
-                    </p>
-                </div>
-            )}
-
-            {!hasPoolData && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-                    <h3 className="font-semibold text-yellow-900 mb-2">
-                        No Shared Pool Data
-                    </h3>
-                    <p className="text-sm text-yellow-800 mb-4">
-                        The shared pool has not been initialized yet. This
-                        happens when no income has been added to the system.
-                    </p>
-                    <p className="text-xs text-yellow-700">
-                        To create a shared pool, add income. The pool will be
-                        automatically set up with personal allowances based on
-                        your settings.
-                    </p>
-                    <p className="text-xs text-yellow-700 mt-2">
-                        Expenses can still be tracked without a pool - they will
-                        create reimbursements that need to be settled manually.
-                    </p>
-                </div>
-            )}
-
-            {hasPoolData && (
-                <>
-                    <div className="space-y-4">
-                        <div className="flex items-center gap-2">
-                            <h3 className="text-base font-semibold text-muted-foreground uppercase tracking-wide">
-                                All-Time Pool
-                            </h3>
-                            <div className="flex-1 h-px bg-border"></div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <Card className="border-2 border-primary/20">
-                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                    <CardTitle className="text-sm font-medium">
-                                        Pool Balance
-                                    </CardTitle>
-                                    <Wallet className="h-4 w-4 text-primary" />
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="text-2xl font-bold text-primary">
-                                        {formatCurrency(pool.balance)}
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">
-                                        Available now (continuous)
-                                    </p>
-                                </CardContent>
-                            </Card>
-
-                            <Card>
-                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                    <CardTitle className="text-sm font-medium">
-                                        Total Pool Spent
-                                    </CardTitle>
-                                    <Wallet className="h-4 w-4 text-muted-foreground" />
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="text-2xl font-bold">
-                                        {formatCurrency(pool.totalPoolSpent)}
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">
-                                        All-time deducted from pool
-                                    </p>
-                                </CardContent>
-                            </Card>
-
-                            <Card>
-                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                    <CardTitle className="text-sm font-medium">
-                                        Pending Reimbursements
-                                    </CardTitle>
-                                    <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="text-2xl font-bold">
-                                        {formatCurrency(
-                                            totalReimbursementsOwed,
-                                        )}
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">
-                                        {reimbursements.length} waiting to be
-                                        settled
-                                    </p>
-                                </CardContent>
-                            </Card>
-                        </div>
-                    </div>
-
-                    {hasIncomeThisMonth && (
-                        <div className="space-y-4">
-                            <div className="flex items-center gap-2">
-                                <h3 className="text-base font-semibold text-muted-foreground uppercase tracking-wide">
-                                    {month
-                                        ? `Current month: ${formatMonth(month)}`
-                                        : "Current Month"}
-                                </h3>
-                                <div className="flex-1 h-px bg-border"></div>
+                {/* This Month Pool Activity */}
+                <Card className="border-2 border-green-200 bg-green-50/30">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-medium flex items-center gap-2">
+                            <DollarSign className="h-4 w-4 text-green-600" />
+                            {formatMonth(month || getCurrentMonth())}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="space-y-3">
+                            <div className="flex justify-between items-baseline">
+                                <span className="text-xs text-muted-foreground">
+                                    Income:
+                                </span>
+                                <span className="text-lg font-semibold text-green-700">
+                                    {formatCurrency(totalIncome)}
+                                </span>
                             </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <Card className="border-2 border-green-200 bg-green-50/50">
-                                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                        <CardTitle className="text-sm font-medium">
-                                            Income Added
-                                        </CardTitle>
-                                        <DollarSign className="h-4 w-4 text-green-600" />
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="text-2xl font-bold text-green-700">
-                                            {formatCurrency(
-                                                pool.totalIncomeThisMonth,
-                                            )}
-                                        </div>
-                                        <p className="text-xs text-green-700/70">
-                                            Allowances allocated:{" "}
-                                            {formatCurrency(
-                                                pool.personalAllocationThisMonth,
-                                            )}
-                                        </p>
-                                        <p className="text-xs text-green-700/70 mt-1">
-                                            To pool:{" "}
-                                            {formatCurrency(
-                                                pool.totalIncomeThisMonth -
-                                                    pool.personalAllocationThisMonth,
-                                            )}
-                                        </p>
-                                    </CardContent>
-                                </Card>
-
-                                <Card className="border-2 border-orange-200 bg-orange-50/50">
-                                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                        <CardTitle className="text-sm font-medium">
-                                            Total Spent
-                                        </CardTitle>
-                                        <Wallet className="h-4 w-4 text-orange-600" />
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="text-2xl font-bold text-orange-700">
-                                            {formatCurrency(
-                                                allowances.reduce(
-                                                    (sum, a) => sum + a.spent,
-                                                    0,
-                                                ),
-                                            )}
-                                        </div>
-                                        <p className="text-xs text-orange-700/70">
-                                            From personal allowances
-                                        </p>
-                                    </CardContent>
-                                </Card>
+                            <div className="flex justify-between items-baseline">
+                                <span className="text-xs text-muted-foreground">
+                                    To pool:
+                                </span>
+                                <span className="text-sm font-medium text-green-600">
+                                    +{formatCurrency(amountToPool)}
+                                </span>
                             </div>
-                        </div>
-                    )}
-
-                    {allowances.length > 0 && (
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {allowances.map((allowance) => (
-                                    <Card key={allowance.userId}>
-                                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                            <CardTitle className="text-sm font-medium">
-                                                {allowance.userName}
-                                            </CardTitle>
-                                            <Users className="h-4 w-4 text-muted-foreground" />
-                                        </CardHeader>
-                                        <CardContent>
-                                            <div className="space-y-2">
-                                                <div>
-                                                    <div className="text-2xl font-bold">
-                                                        {formatCurrency(
-                                                            allowance.remaining,
-                                                        )}
-                                                    </div>
-                                                    <p className="text-xs text-muted-foreground">
-                                                        Available balance
-                                                    </p>
-                                                </div>
-
-                                                {allowance.carriedOver !==
-                                                    0 && (
-                                                    <div className="text-xs">
-                                                        <span
-                                                            className={
-                                                                allowance.carriedOver >
-                                                                0
-                                                                    ? "text-green-600"
-                                                                    : "text-red-600"
-                                                            }
-                                                        >
-                                                            {allowance.carriedOver >
-                                                            0
-                                                                ? "+"
-                                                                : ""}
-                                                            {formatCurrency(
-                                                                allowance.carriedOver,
-                                                            )}{" "}
-                                                            carried from last
-                                                            month
-                                                        </span>
-                                                    </div>
-                                                )}
-
-                                                <div className="flex justify-between text-xs text-muted-foreground">
-                                                    <span>
-                                                        Allocated:{" "}
-                                                        {formatCurrency(
-                                                            allowance.allocated,
-                                                        )}
-                                                    </span>
-                                                    <span>
-                                                        Spent:{" "}
-                                                        {formatCurrency(
-                                                            allowance.spent,
-                                                        )}
-                                                    </span>
-                                                </div>
-
-                                                <div className="mt-2">
-                                                    <div className="w-full bg-muted rounded-full h-2">
-                                                        <div
-                                                            className={`h-2 rounded-full ${
-                                                                allowance.remaining <
-                                                                0
-                                                                    ? "bg-red-500"
-                                                                    : "bg-green-500"
-                                                            }`}
-                                                            style={{
-                                                                width: `${Math.min(
-                                                                    100,
-                                                                    Math.max(
-                                                                        0,
-                                                                        ((allowance.allocated -
-                                                                            allowance.spent) /
-                                                                            allowance.allocated) *
-                                                                            100,
-                                                                    ),
-                                                                )}%`,
-                                                            }}
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                {allowance.remaining < 0 && (
-                                                    <p className="text-xs text-red-600 mt-1">
-                                                        ⚠️ Overspent by{" "}
-                                                        {formatCurrency(
-                                                            Math.abs(
-                                                                allowance.remaining,
-                                                            ),
-                                                        )}
-                                                    </p>
-                                                )}
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                ))}
+                            <div className="flex justify-between items-baseline">
+                                <span className="text-xs text-muted-foreground">
+                                    Pool spent:
+                                </span>
+                                <span className="text-sm font-medium text-red-600">
+                                    -{formatCurrency(totalPoolExpenses)}
+                                </span>
                             </div>
-                        </div>
-                    )}
-
-                    {reimbursements.length > 0 && (
-                        <div>
-                            <div className="flex items-center justify-between mb-3">
-                                <h4 className="text-sm font-semibold">
-                                    Pending Reimbursements
-                                </h4>
-                                <p className="text-xs text-muted-foreground">
-                                    {reimbursements.length} pending
+                            <Separator />
+                            <div className="flex justify-between items-baseline">
+                                <span className="text-xs font-medium">
+                                    Pool balance this month:
+                                </span>
+                                <span
+                                    className={`text-lg font-bold ${monthlyPoolBalance >= 0 ? "text-green-600" : "text-red-600"}`}
+                                >
+                                    {formatCurrency(monthlyPoolBalance)}
+                                </span>
+                            </div>
+                            {/* Monthly Pool Health Bar */}
+                            <div className="mt-2">
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                    <div
+                                        className={`h-2 rounded-full transition-all ${
+                                            poolHealthPercentage > 50
+                                                ? "bg-green-600"
+                                                : poolHealthPercentage > 25
+                                                  ? "bg-yellow-600"
+                                                  : "bg-red-600"
+                                        }`}
+                                        style={{
+                                            width: `${poolHealthPercentage}%`,
+                                        }}
+                                    />
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    {poolHealthPercentage.toFixed(0)}% of
+                                    monthly pool remaining
                                 </p>
                             </div>
-                            <div className="border rounded-lg">
-                                <div className="divide-y">
-                                    {reimbursements.map((reimbursement) => {
-                                        const currentMonth =
-                                            month || getCurrentMonth();
-                                        const isFromPreviousMonth =
-                                            reimbursement.month < currentMonth;
-                                        return (
-                                            <div
-                                                key={reimbursement.id}
-                                                className={`p-4 flex items-center justify-between ${
-                                                    isFromPreviousMonth
-                                                        ? "bg-yellow-50"
-                                                        : ""
-                                                }`}
-                                            >
-                                                <div>
-                                                    <p className="font-medium">
-                                                        {reimbursement.userName}
-                                                    </p>
-                                                    <p className="text-sm text-muted-foreground">
-                                                        {
-                                                            reimbursement.description
-                                                        }
-                                                    </p>
-                                                    <div className="flex items-center gap-2 mt-1">
-                                                        <p className="text-xs text-muted-foreground">
-                                                            {formatMonth(
-                                                                reimbursement.month,
-                                                            )}
-                                                        </p>
-                                                        {isFromPreviousMonth && (
-                                                            <span className="text-xs px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded-full">
-                                                                Overdue
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <div className="text-right">
-                                                    <p className="font-semibold">
-                                                        {formatCurrency(
-                                                            reimbursement.amount,
-                                                        )}
-                                                    </p>
-                                                    <p className="text-xs text-muted-foreground">
-                                                        From pool
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
                         </div>
-                    )}
-                </>
-            )}
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Personal Allowances */}
+            <div>
+                <h3 className="text-sm font-medium mb-3">
+                    Personal Allowances
+                </h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                    {allowances.map((allowance) => (
+                        <Card
+                            key={allowance.householdMemberId}
+                            className={
+                                allowance.remaining < 0
+                                    ? "border-2 border-red-200 bg-red-50/30"
+                                    : ""
+                            }
+                        >
+                            <CardHeader className="pb-3">
+                                <CardTitle className="text-sm font-medium">
+                                    {allowance.memberName}
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="space-y-2">
+                                    <div className="text-2xl font-bold">
+                                        {formatCurrency(allowance.remaining)}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                        Remaining this month
+                                    </p>
+
+                                    <Separator className="my-2" />
+
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-muted-foreground">
+                                            Allocated:
+                                        </span>
+                                        <span>
+                                            {formatCurrency(
+                                                allowance.allocated,
+                                            )}
+                                        </span>
+                                    </div>
+                                    {allowance.carriedOver > 0 && (
+                                        <div className="flex justify-between text-xs">
+                                            <span className="text-muted-foreground">
+                                                Carried over:
+                                            </span>
+                                            <span className="text-green-600">
+                                                +
+                                                {formatCurrency(
+                                                    allowance.carriedOver,
+                                                )}
+                                            </span>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-muted-foreground">
+                                            Spent:
+                                        </span>
+                                        <span>
+                                            {formatCurrency(allowance.spent)}
+                                        </span>
+                                    </div>
+
+                                    {/* Progress bar */}
+                                    <div className="mt-3">
+                                        <div className="w-full bg-green-200 rounded-full h-2.5">
+                                            <div
+                                                className="h-2.5 rounded-full transition-all bg-green-600"
+                                                style={{
+                                                    width: `${Math.max(
+                                                        0,
+                                                        100 -
+                                                            Math.min(
+                                                                100,
+                                                                (allowance.spent /
+                                                                    (allowance.allocated +
+                                                                        allowance.carriedOver ||
+                                                                        1)) *
+                                                                    100,
+                                                            ),
+                                                    )}%`,
+                                                }}
+                                            />
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-1 text-right">
+                                            {Math.max(
+                                                0,
+                                                100 -
+                                                    Math.min(
+                                                        100,
+                                                        (allowance.spent /
+                                                            (allowance.allocated +
+                                                                allowance.carriedOver ||
+                                                                1)) *
+                                                            100,
+                                                    ),
+                                            ).toFixed(0)}
+                                            % remaining
+                                        </p>
+                                    </div>
+
+                                    {allowance.remaining < 0 && (
+                                        <p className="text-xs text-red-600 mt-2 font-medium">
+                                            ⚠️ Overspent by{" "}
+                                            {formatCurrency(
+                                                Math.abs(allowance.remaining),
+                                            )}
+                                        </p>
+                                    )}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+            </div>
         </div>
     );
 }

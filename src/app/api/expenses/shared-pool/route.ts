@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import {
-    getMonthFromDate,
-    deductFromSharedPool,
-    deductFromPersonalAllowance,
-    createReimbursementForExpense,
-} from "@/lib/accounting/shared-pool";
+import { createReimbursementForExpense } from "@/lib/accounting/shared-pool";
+import { auth } from "@/auth/config";
 
 /**
  * POST - Create expense in Shared Pool mode
- * This handles expense creation with pool deductions and reimbursements
+ * Just creates the expense record - pool balance is calculated on-the-fly
  */
 export async function POST(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
         const body = await request.json();
         const {
             date,
@@ -36,89 +42,47 @@ export async function POST(request: NextRequest) {
         }
 
         const expenseDate = new Date(date);
-        const month = getMonthFromDate(expenseDate);
+        const expenseAmount = parseFloat(amount);
+
+        // Determine if needs reimbursement (shared expense not paid from pool)
+        const needsReimbursement = type === "shared" && paidFromPool === false;
 
         const expense = await prisma.expense.create({
             data: {
+                userId,
                 date: expenseDate,
                 description,
                 categoryId,
-                amount: parseFloat(amount),
+                amount: expenseAmount,
                 currency: currency || "EUR",
                 paidById,
                 type: type || "shared",
-                paid: type === "personal" ? true : false,
+                paid: type === "personal" ? true : paidFromPool === true,
                 paidFromPool: paidFromPool || false,
-                needsReimbursement: false,
+                needsReimbursement,
             },
         });
 
-        let warning: string | undefined;
-
-        if (type === "personal") {
-            const result = await deductFromPersonalAllowance(
+        // If needs reimbursement, create the reimbursement record
+        if (needsReimbursement) {
+            const result = await createReimbursementForExpense(
+                expense.id,
                 paidById,
-                parseFloat(amount),
-                month,
+                expenseAmount,
             );
 
             if (!result.success) {
                 await prisma.expense.delete({ where: { id: expense.id } });
                 return NextResponse.json(
                     {
-                        error:
-                            result.error ||
-                            "Failed to deduct from personal allowance",
+                        error: result.error || "Failed to create reimbursement",
                     },
                     { status: 400 },
                 );
             }
-
-            if (result.warning) {
-                warning = result.warning;
-            }
-        } else {
-            if (paidFromPool) {
-                const result = await deductFromSharedPool(
-                    expense.id,
-                    parseFloat(amount),
-                    month,
-                );
-
-                if (!result.success) {
-                    await prisma.expense.delete({ where: { id: expense.id } });
-                    return NextResponse.json(
-                        {
-                            error:
-                                result.error ||
-                                "Failed to deduct from shared pool",
-                        },
-                        { status: 400 },
-                    );
-                }
-            } else {
-                const result = await createReimbursementForExpense(
-                    expense.id,
-                    paidById,
-                    parseFloat(amount),
-                    description,
-                    month,
-                );
-
-                if (!result.success) {
-                    await prisma.expense.delete({ where: { id: expense.id } });
-                    return NextResponse.json(
-                        {
-                            error:
-                                result.error ||
-                                "Failed to create reimbursement",
-                        },
-                        { status: 400 },
-                    );
-                }
-            }
         }
 
+        // Link transaction if provided
         if (transactionId) {
             await prisma.transaction.updateMany({
                 where: { transactionId },
@@ -137,7 +101,6 @@ export async function POST(request: NextRequest) {
                     select: {
                         id: true,
                         name: true,
-                        email: true,
                     },
                 },
                 reimbursement: {
@@ -155,7 +118,6 @@ export async function POST(request: NextRequest) {
             success: true,
             expense: completeExpense,
             mode: "shared_pool",
-            warning,
         });
     } catch (error: unknown) {
         console.error("Error creating shared pool expense:", error);

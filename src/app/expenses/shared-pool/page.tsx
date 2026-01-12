@@ -30,8 +30,8 @@ import { useRouter } from "next/navigation";
 import { formatCurrency } from "@/lib/utils";
 
 interface PersonalAllowance {
-    userId: string;
-    userName: string;
+    householdMemberId: string;
+    memberName: string;
     allocated: number;
     spent: number;
     remaining: number;
@@ -67,17 +67,22 @@ interface Expense {
     needsReimbursement: boolean;
 }
 
+interface HouseholdMember {
+    id: string;
+    name: string;
+}
+
 interface Reimbursement {
     id: string;
     userId: string;
-    userName: string;
+    householdMemberId: string;
     month: string;
     amount: number;
     description: string;
     settled: boolean;
     createdAt: string;
     settledAt?: string;
-    user: User;
+    householdMember: HouseholdMember;
 }
 
 export default function SharedPoolExpensesPage() {
@@ -126,8 +131,8 @@ export default function SharedPoolExpensesPage() {
             const monthKey = getSelectedMonthKey();
             const response = await fetch(`/api/shared-pool?month=${monthKey}`);
             const data = await response.json();
-            if (data.allowances) {
-                setAllowances(data.allowances);
+            if (data.memberAllowances) {
+                setAllowances(data.memberAllowances);
             }
         } catch (error) {
             console.error("Error fetching allowances:", error);
@@ -372,7 +377,7 @@ export default function SharedPoolExpensesPage() {
         };
     };
 
-    const stats = calculateStats();
+    const _stats = calculateStats();
 
     if (modeLoading || loading) {
         return (
@@ -660,55 +665,10 @@ export default function SharedPoolExpensesPage() {
                         label: "Overview",
                         icon: <TabIcons.Overview className="h-4 w-4" />,
                         content: (
-                            <>
-                                <SharedPoolSummary
-                                    key={`${poolRefreshKey}-${getSelectedMonthKey()}`}
-                                    month={getSelectedMonthKey()}
-                                />
-
-                                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                                    <Card>
-                                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                            <CardTitle className="text-sm font-medium">
-                                                Pool Spent (Filtered)
-                                            </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <p className="text-2xl font-bold">
-                                                {formatCurrency(
-                                                    stats.totalPoolSpent,
-                                                )}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground mt-1">
-                                                In selected period
-                                            </p>
-                                        </CardContent>
-                                    </Card>
-
-                                    {activeUsers.map((user) => (
-                                        <Card key={user.id}>
-                                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                                <CardTitle className="text-sm font-medium">
-                                                    {user.name} Personal
-                                                </CardTitle>
-                                            </CardHeader>
-                                            <CardContent>
-                                                <p className="text-2xl font-bold">
-                                                    {formatCurrency(
-                                                        stats
-                                                            .userPersonalSpending[
-                                                            user.id
-                                                        ] || 0,
-                                                    )}
-                                                </p>
-                                                <p className="text-xs text-muted-foreground mt-1">
-                                                    Personal spending in period
-                                                </p>
-                                            </CardContent>
-                                        </Card>
-                                    ))}
-                                </div>
-                            </>
+                            <SharedPoolSummary
+                                key={`${poolRefreshKey}-${getSelectedMonthKey()}`}
+                                month={getSelectedMonthKey()}
+                            />
                         ),
                     },
                     {
@@ -830,7 +790,9 @@ export default function SharedPoolExpensesPage() {
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             {allowances.map((allowance) => (
                                                 <Card
-                                                    key={allowance.userId}
+                                                    key={
+                                                        allowance.householdMemberId
+                                                    }
                                                     className={
                                                         allowance.remaining < 0
                                                             ? "border-2 border-red-200 bg-red-50/30"
@@ -839,7 +801,9 @@ export default function SharedPoolExpensesPage() {
                                                 >
                                                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                                         <CardTitle className="text-sm font-medium">
-                                                            {allowance.userName}
+                                                            {
+                                                                allowance.memberName
+                                                            }
                                                         </CardTitle>
                                                         <Users className="h-4 w-4 text-muted-foreground" />
                                                     </CardHeader>

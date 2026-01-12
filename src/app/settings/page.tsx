@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Save, Info, Settings as SettingsIcon } from "lucide-react";
+import {
+    Plus,
+    Save,
+    Info,
+    Settings as SettingsIcon,
+    Shield,
+    Trash2,
+    Calendar,
+    Fingerprint,
+} from "lucide-react";
+import { startRegistration } from "@simplewebauthn/browser";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,24 +36,32 @@ interface User {
 
 interface UserAllowanceConfig {
     id: string;
-    userId: string;
+    householdMemberId: string;
     type: "percentage" | "fixed";
     value: number;
     isActive: boolean;
-    user?: User;
+    householdMember?: User;
 }
 
 interface Settings {
-    defaultPaidBy: string | null;
     defaultType: string;
     defaultSplitType: string;
     accountingMode: string;
 }
 
+interface MFAMethod {
+    id: string;
+    type: string;
+    name: string | null;
+    createdAt: string;
+    passkeyData?: {
+        lastUsedAt: string;
+    } | null;
+}
+
 export default function SettingsPage() {
     const [users, setUsers] = useState<User[]>([]);
     const [settings, setSettings] = useState<Settings>({
-        defaultPaidBy: null,
         defaultType: "shared",
         defaultSplitType: "equal",
         accountingMode: "individual",
@@ -62,6 +80,9 @@ export default function SettingsPage() {
     const [editingAllowance, setEditingAllowance] = useState<{
         [userId: string]: { type: string; value: string };
     }>({});
+    const [mfaMethods, setMfaMethods] = useState<MFAMethod[]>([]);
+    const [addingPasskey, setAddingPasskey] = useState(false);
+    const [newPasskeyName, setNewPasskeyName] = useState("");
 
     useEffect(() => {
         loadData();
@@ -69,11 +90,13 @@ export default function SettingsPage() {
 
     const loadData = async () => {
         try {
-            const [usersRes, settingsRes, configsRes] = await Promise.all([
-                fetch("/api/users"),
-                fetch("/api/settings"),
-                fetch("/api/user-allowance-config"),
-            ]);
+            const [usersRes, settingsRes, configsRes, mfaRes] =
+                await Promise.all([
+                    fetch("/api/users"),
+                    fetch("/api/settings"),
+                    fetch("/api/user-allowance-config"),
+                    fetch("/api/auth/mfa-methods"),
+                ]);
 
             if (usersRes.ok) {
                 const usersData = await usersRes.json();
@@ -82,8 +105,16 @@ export default function SettingsPage() {
 
             if (settingsRes.ok) {
                 const settingsData = await settingsRes.json();
-                if (settingsData.settings) {
-                    setSettings(settingsData.settings);
+                if (settingsData.success) {
+                    setSettings({
+                        accountingMode:
+                            settingsData.accountingMode || "individual",
+                        defaultType:
+                            settingsData.userSettings?.defaultType || "shared",
+                        defaultSplitType:
+                            settingsData.userSettings?.defaultSplitType ||
+                            "equal",
+                    });
                 }
             }
 
@@ -93,10 +124,110 @@ export default function SettingsPage() {
                     setAllowanceConfigs(configsData.configs || []);
                 }
             }
+
+            if (mfaRes.ok) {
+                const mfaData = await mfaRes.json();
+                if (mfaData.success) {
+                    setMfaMethods(mfaData.methods || []);
+                }
+            }
         } catch (error) {
             console.error("Error loading data:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleDeleteMFAMethod = async (methodId: string) => {
+        if (
+            !confirm(
+                "Are you sure you want to remove this authentication method?",
+            )
+        ) {
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const response = await fetch("/api/auth/mfa-methods", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ methodId }),
+            });
+
+            if (response.ok) {
+                await loadData();
+                toast.success("Authentication method removed");
+            } else {
+                const data = await response.json();
+                toast.error(data.error || "Failed to remove method");
+            }
+        } catch (error) {
+            console.error("Error deleting MFA method:", error);
+            toast.error("Failed to remove method");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleAddPasskey = async () => {
+        if (!newPasskeyName.trim()) {
+            toast.error("Please enter a device name");
+            return;
+        }
+
+        setAddingPasskey(true);
+
+        try {
+            const optionsResponse = await fetch(
+                "/api/auth/webauthn/register/options",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                },
+            );
+
+            if (!optionsResponse.ok) {
+                throw new Error("Failed to get registration options");
+            }
+
+            const { options, challenge } = await optionsResponse.json();
+
+            const credential = await startRegistration(options);
+
+            const verifyResponse = await fetch(
+                "/api/auth/webauthn/register/verify",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        credential,
+                        challenge,
+                        deviceName: newPasskeyName.trim(),
+                    }),
+                },
+            );
+
+            if (!verifyResponse.ok) {
+                throw new Error("Failed to verify registration");
+            }
+
+            toast.success("Passkey added successfully!");
+            setNewPasskeyName("");
+            await loadData();
+        } catch (error) {
+            console.error("Error adding passkey:", error);
+            if (error instanceof Error) {
+                if (error.name === "NotAllowedError") {
+                    toast.error("Passkey registration was cancelled");
+                } else {
+                    toast.error(error.message || "Failed to add passkey");
+                }
+            } else {
+                toast.error("Failed to add passkey. Please try again.");
+            }
+        } finally {
+            setAddingPasskey(false);
         }
     };
 
@@ -189,21 +320,14 @@ export default function SettingsPage() {
             });
 
             if (response.ok) {
-                const data = await response.json();
-
-                if (data.poolInitialized) {
-                    toast.success(
-                        data.message ||
-                            "Shared pool initialized with existing income data",
-                    );
-                } else {
-                    toast.success("Settings saved successfully");
-                }
+                await response.json();
+                toast.success("Settings saved successfully");
 
                 // Notify other components that accounting mode changed
                 window.dispatchEvent(new Event("accounting-mode-changed"));
             } else {
-                toast.error("Failed to save settings");
+                const errorData = await response.json();
+                toast.error(errorData.error || "Failed to save settings");
             }
         } catch (error) {
             console.error("Error saving settings:", error);
@@ -274,8 +398,15 @@ export default function SettingsPage() {
                                         {showAddUser && (
                                             <div className="mb-6 p-4 border rounded-lg bg-muted/50">
                                                 <h3 className="font-medium mb-4">
-                                                    Add New Member
+                                                    Add New Household Member
                                                 </h3>
+                                                <p className="text-sm text-muted-foreground mb-4">
+                                                    Add household members for
+                                                    expense tracking. Email is
+                                                    optional - members
+                                                    don&apos;t need login
+                                                    credentials.
+                                                </p>
                                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                     <div>
                                                         <Label className="block mb-2">
@@ -297,7 +428,7 @@ export default function SettingsPage() {
                                                     </div>
                                                     <div>
                                                         <Label className="block mb-2">
-                                                            Email
+                                                            Email (optional)
                                                         </Label>
                                                         <Input
                                                             type="email"
@@ -312,7 +443,7 @@ export default function SettingsPage() {
                                                                         .value,
                                                                 })
                                                             }
-                                                            placeholder="john@example.com"
+                                                            placeholder="Optional"
                                                         />
                                                     </div>
                                                     {settings.accountingMode ===
@@ -406,7 +537,7 @@ export default function SettingsPage() {
                                                         </div>
                                                         <div>
                                                             <Label className="block mb-1">
-                                                                Email
+                                                                Email (optional)
                                                             </Label>
                                                             <Input
                                                                 type="email"
@@ -424,6 +555,7 @@ export default function SettingsPage() {
                                                                         },
                                                                     )
                                                                 }
+                                                                placeholder="Optional"
                                                             />
                                                         </div>
                                                         {settings.accountingMode ===
@@ -728,7 +860,7 @@ export default function SettingsPage() {
                                                         const config =
                                                             allowanceConfigs.find(
                                                                 (c) =>
-                                                                    c.userId ===
+                                                                    c.householdMemberId ===
                                                                     user.id,
                                                             );
                                                         const editing =
@@ -756,11 +888,17 @@ export default function SettingsPage() {
                                                                         }
                                                                     </h3>
                                                                     {config &&
-                                                                        !editing && (
-                                                                            <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded">
-                                                                                Configured
-                                                                            </span>
-                                                                        )}
+                                                                    !editing ? (
+                                                                        <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded">
+                                                                            Configured
+                                                                        </span>
+                                                                    ) : !config &&
+                                                                      !editing ? (
+                                                                        <span className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded">
+                                                                            Not
+                                                                            Configured
+                                                                        </span>
+                                                                    ) : null}
                                                                 </div>
 
                                                                 <div className="grid grid-cols-2 gap-3">
@@ -901,7 +1039,8 @@ export default function SettingsPage() {
                                                                                                     },
                                                                                                 body: JSON.stringify(
                                                                                                     {
-                                                                                                        userId: user.id,
+                                                                                                        householdMemberId:
+                                                                                                            user.id,
                                                                                                         type: editing.type,
                                                                                                         value: parseFloat(
                                                                                                             editing.value,
@@ -1008,9 +1147,12 @@ export default function SettingsPage() {
                                                                                     },
                                                                                 )
                                                                             }
-                                                                            className="mt-3 px-3 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90"
+                                                                            className="mt-3 px-4 py-2 text-sm bg-yellow-600 text-white rounded hover:bg-yellow-700 font-medium"
                                                                         >
-                                                                            Configure
+                                                                            ⚠️
+                                                                            Set
+                                                                            Up
+                                                                            Allowance
                                                                         </button>
                                                                     )}
                                                             </div>
@@ -1064,44 +1206,6 @@ export default function SettingsPage() {
                                     </CardHeader>
                                     <CardContent>
                                         <div className="space-y-4">
-                                            <div>
-                                                <label className="text-sm font-medium block mb-2">
-                                                    Default Paid By
-                                                </label>
-                                                <select
-                                                    value={
-                                                        settings.defaultPaidBy ||
-                                                        ""
-                                                    }
-                                                    onChange={(e) =>
-                                                        setSettings({
-                                                            ...settings,
-                                                            defaultPaidBy:
-                                                                e.target
-                                                                    .value ||
-                                                                null,
-                                                        })
-                                                    }
-                                                    className="w-full p-2 border rounded"
-                                                >
-                                                    <option value="">
-                                                        None
-                                                    </option>
-                                                    {users
-                                                        .filter(
-                                                            (u) => u.isActive,
-                                                        )
-                                                        .map((user) => (
-                                                            <option
-                                                                key={user.id}
-                                                                value={user.id}
-                                                            >
-                                                                {user.name}
-                                                            </option>
-                                                        ))}
-                                                </select>
-                                            </div>
-
                                             <div>
                                                 <label className="text-sm font-medium block mb-2">
                                                     Default Expense Type
@@ -1158,6 +1262,153 @@ export default function SettingsPage() {
                                                     </select>
                                                 </div>
                                             )}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            ),
+                        },
+                        {
+                            value: "security",
+                            label: "Security",
+                            icon: <Shield className="h-4 w-4" />,
+                            content: (
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>
+                                            Multi-Factor Authentication
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <p className="text-sm text-muted-foreground mb-6">
+                                            Manage your authentication methods.
+                                            At least one method is required.
+                                        </p>
+
+                                        {mfaMethods.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground">
+                                                No authentication methods found.
+                                            </p>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                {mfaMethods.map((method) => (
+                                                    <div
+                                                        key={method.id}
+                                                        className="flex items-center justify-between p-4 border rounded-lg"
+                                                    >
+                                                        <div className="flex items-center gap-4">
+                                                            <Shield className="h-5 w-5 text-primary" />
+                                                            <div>
+                                                                <p className="font-medium">
+                                                                    {method.name ||
+                                                                        `${method.type.charAt(0).toUpperCase() + method.type.slice(1)}`}
+                                                                </p>
+                                                                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                                                                    <span className="flex items-center gap-1">
+                                                                        <Calendar className="h-3 w-3" />
+                                                                        Added{" "}
+                                                                        {new Date(
+                                                                            method.createdAt,
+                                                                        ).toLocaleDateString()}
+                                                                    </span>
+                                                                    {method
+                                                                        .passkeyData
+                                                                        ?.lastUsedAt && (
+                                                                        <span>
+                                                                            Last
+                                                                            used{" "}
+                                                                            {new Date(
+                                                                                method
+                                                                                    .passkeyData
+                                                                                    .lastUsedAt,
+                                                                            ).toLocaleDateString()}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                handleDeleteMFAMethod(
+                                                                    method.id,
+                                                                )
+                                                            }
+                                                            disabled={
+                                                                mfaMethods.length ===
+                                                                    1 || saving
+                                                            }
+                                                            title={
+                                                                mfaMethods.length ===
+                                                                1
+                                                                    ? "Cannot delete last method"
+                                                                    : "Remove method"
+                                                            }
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <div className="mt-6">
+                                            <h3 className="font-medium mb-4">
+                                                Add New Passkey
+                                            </h3>
+                                            <div className="flex gap-3">
+                                                <div className="flex-1">
+                                                    <Input
+                                                        placeholder="Device name (e.g., iPhone, Laptop)"
+                                                        value={newPasskeyName}
+                                                        onChange={(e) =>
+                                                            setNewPasskeyName(
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                        disabled={addingPasskey}
+                                                    />
+                                                </div>
+                                                <Button
+                                                    onClick={handleAddPasskey}
+                                                    disabled={
+                                                        addingPasskey ||
+                                                        !newPasskeyName.trim()
+                                                    }
+                                                >
+                                                    {addingPasskey ? (
+                                                        "Adding..."
+                                                    ) : (
+                                                        <>
+                                                            <Fingerprint className="h-4 w-4 mr-2" />
+                                                            Add Passkey
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-6 p-4 bg-muted/50 rounded-lg">
+                                            <div className="flex items-start gap-3">
+                                                <Info className="h-5 w-5 text-muted-foreground mt-0.5" />
+                                                <div className="space-y-1">
+                                                    <p className="text-sm font-medium">
+                                                        About Multi-Factor
+                                                        Authentication
+                                                    </p>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        MFA is required for all
+                                                        accounts. You must have
+                                                        at least one
+                                                        authentication method
+                                                        set up. Passkeys use
+                                                        your device&apos;s
+                                                        biometric authentication
+                                                        (Face ID, Touch ID) or
+                                                        security key.
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </div>
                                     </CardContent>
                                 </Card>

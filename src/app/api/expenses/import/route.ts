@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { calculateExpenseSplits } from "@/lib/users";
+import { auth } from "@/auth/config";
 
 export async function POST(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
         const body = await request.json();
-        const { transactionIds, userId, splitType } = body;
+        const { transactionIds, householdMemberId, splitType } = body;
 
         if (!transactionIds || !Array.isArray(transactionIds)) {
             return NextResponse.json(
@@ -21,32 +31,35 @@ export async function POST(request: NextRequest) {
             },
         });
 
-        // Get active users for splitting
-        const activeUsers = await prisma.user.findMany({
-            include: {
-                _count: true,
-            },
-        });
-
-        const userRatios = await prisma.userSplitRatio.findMany({
+        // Get active household members for this user
+        const activeMembers = await prisma.householdMember.findMany({
             where: {
-                userId: { in: activeUsers.map((u) => u.id) },
+                userId,
                 isActive: true,
             },
         });
 
-        if (userRatios.length === 0) {
+        const memberRatios = await prisma.householdMemberSplitRatio.findMany({
+            where: {
+                householdMemberId: { in: activeMembers.map((m) => m.id) },
+                isActive: true,
+            },
+        });
+
+        if (memberRatios.length === 0) {
             return NextResponse.json(
-                { error: "No active users found for splitting expenses" },
+                {
+                    error: "No active household members found for splitting expenses",
+                },
                 { status: 400 },
             );
         }
 
-        // Determine default paidBy user
-        let defaultPaidBy = userId;
+        // Determine default paidBy member
+        let defaultPaidBy = householdMemberId;
         if (!defaultPaidBy) {
-            const settings = await prisma.settings.findFirst();
-            defaultPaidBy = settings?.defaultPaidBy || userRatios[0]?.userId;
+            // Use first active member as default
+            defaultPaidBy = activeMembers[0]?.id;
         }
 
         // Determine split type
@@ -60,6 +73,7 @@ export async function POST(request: NextRequest) {
 
             let category = await prisma.category.findFirst({
                 where: {
+                    userId,
                     name: {
                         contains: categoryName,
                     },
@@ -68,22 +82,71 @@ export async function POST(request: NextRequest) {
 
             if (!category) {
                 category = await prisma.category.findFirst({
-                    where: { name: "Restaurantes" },
+                    where: {
+                        userId,
+                        name: "Restaurantes",
+                    },
                 });
             }
 
-            if (!category) continue;
+            // If still no category, create a default one
+            if (!category) {
+                category = await prisma.category.create({
+                    data: {
+                        userId,
+                        name: "Outros",
+                        icon: "📦",
+                    },
+                });
+            }
 
             const amount = Math.abs(transaction.amount);
 
             // Calculate splits based on the split type
-            const splits = await calculateExpenseSplits(
-                amount,
-                effectiveSplitType as "equal" | "ratio" | "custom",
-            );
+            let splits: Array<{
+                householdMemberId: string;
+                amount: number;
+                paid: boolean;
+            }> = [];
+
+            if (effectiveSplitType === "equal") {
+                const splitAmount = amount / activeMembers.length;
+                splits = activeMembers.map((member) => ({
+                    householdMemberId: member.id,
+                    amount: splitAmount,
+                    paid: member.id === defaultPaidBy,
+                }));
+            } else if (effectiveSplitType === "ratio") {
+                const totalRatio = memberRatios.reduce(
+                    (sum, mr) => sum + mr.ratio,
+                    0,
+                );
+
+                if (totalRatio === 0) {
+                    return NextResponse.json(
+                        { error: "Total ratio is zero" },
+                        { status: 400 },
+                    );
+                }
+
+                splits = activeMembers.map((member) => {
+                    const memberRatio = memberRatios.find(
+                        (mr) => mr.householdMemberId === member.id,
+                    );
+                    const ratio = memberRatio?.ratio || 0;
+                    const splitAmount = (amount * ratio) / totalRatio;
+
+                    return {
+                        householdMemberId: member.id,
+                        amount: splitAmount,
+                        paid: member.id === defaultPaidBy,
+                    };
+                });
+            }
 
             const expense = await prisma.expense.create({
                 data: {
+                    userId,
                     date: new Date(transaction.date),
                     description: transaction.name,
                     categoryId: category.id,
@@ -94,9 +157,9 @@ export async function POST(request: NextRequest) {
                     paid: !transaction.pending,
                     splits: {
                         create: splits.map((split) => ({
-                            userId: split.userId,
+                            householdMemberId: split.householdMemberId,
                             amount: split.amount,
-                            paid: split.userId === defaultPaidBy,
+                            paid: split.paid,
                         })),
                     },
                 },
@@ -105,7 +168,7 @@ export async function POST(request: NextRequest) {
                     paidBy: true,
                     splits: {
                         include: {
-                            user: true,
+                            householdMember: true,
                         },
                     },
                 },

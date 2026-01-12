@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useAccountingMode } from "@/hooks/use-accounting-mode";
+import { useSession } from "next-auth/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
     Dialog,
@@ -43,6 +44,19 @@ interface Income {
     user: User;
 }
 
+function getDefaultAllocatedMonth(dateString: string): string {
+    const date = new Date(dateString);
+    const day = date.getDate();
+
+    if (day > 22) {
+        date.setMonth(date.getMonth() + 1);
+    }
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    return `${year}-${month}`;
+}
+
 export default function SharedPoolIncomePage() {
     const _router = useRouter();
     const { accountingMode: _accountingMode, loading: modeLoading } =
@@ -63,9 +77,14 @@ export default function SharedPoolIncomePage() {
         date: new Date().toISOString().split("T")[0],
         description: "",
         amount: "",
-        userId: "",
-        allocatedToMonth: "",
+        householdMemberId: "",
+        type: "salary",
+        allocatedToMonth: getDefaultAllocatedMonth(
+            new Date().toISOString().split("T")[0],
+        ),
     });
+
+    const { data: session } = useSession();
 
     const loadUsers = useCallback(async () => {
         try {
@@ -73,15 +92,18 @@ export default function SharedPoolIncomePage() {
             if (res.ok) {
                 const data = await res.json();
                 setUsers(data);
-                if (data.length > 0 && !formData.userId) {
-                    setFormData((prev) => ({ ...prev, userId: data[0].id }));
+                if (data.length > 0 && !formData.householdMemberId) {
+                    setFormData((prev) => ({
+                        ...prev,
+                        householdMemberId: data[0].id,
+                    }));
                 }
             }
         } catch (error) {
             console.error("Error loading users:", error);
             toast.error("Failed to load users");
         }
-    }, [formData.userId]);
+    }, [formData.householdMemberId]);
 
     const loadIncomes = useCallback(async () => {
         setLoading(true);
@@ -102,17 +124,17 @@ export default function SharedPoolIncomePage() {
 
     useEffect(() => {
         loadUsers();
-    }, [loadUsers]);
-
-    useEffect(() => {
         loadIncomes();
-    }, [loadIncomes]);
+    }, [loadUsers, loadIncomes]);
 
-    // Set initial selected month to current month after incomes load
+    // Set initial selected month to current or next month (after 22nd) after incomes load
     useEffect(() => {
         if (incomes.length > 0 && !selectedMonth) {
-            const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-            setSelectedMonth(currentMonth);
+            const now = new Date();
+            const defaultMonth = getDefaultAllocatedMonth(
+                now.toISOString().split("T")[0],
+            );
+            setSelectedMonth(defaultMonth);
         }
     }, [incomes, selectedMonth]);
 
@@ -120,7 +142,8 @@ export default function SharedPoolIncomePage() {
         e.preventDefault();
 
         if (
-            !formData.userId ||
+            !session?.user?.id ||
+            !formData.householdMemberId ||
             !formData.amount ||
             parseFloat(formData.amount) <= 0
         ) {
@@ -129,28 +152,35 @@ export default function SharedPoolIncomePage() {
         }
 
         try {
+            const allocatedMonth =
+                formData.allocatedToMonth ||
+                getDefaultAllocatedMonth(formData.date);
+
             const res = await fetch("/api/income/shared-pool", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    userId: formData.userId,
+                    householdMemberId: formData.householdMemberId,
                     amount: parseFloat(formData.amount),
-                    date: new Date(formData.date).toISOString(),
+                    date: formData.date,
                     description: formData.description || null,
-                    allocatedToMonth: formData.allocatedToMonth || null,
+                    type: formData.type,
+                    allocatedToMonth: allocatedMonth,
                 }),
             });
 
             if (res.ok) {
                 toast.success("Income added successfully");
+                setShowAddDialog(false);
+                const newDate = new Date().toISOString().split("T")[0];
                 setFormData({
-                    date: new Date().toISOString().split("T")[0],
+                    date: newDate,
                     description: "",
                     amount: "",
-                    userId: formData.userId,
-                    allocatedToMonth: "",
+                    householdMemberId: users[0]?.id || "",
+                    type: "salary",
+                    allocatedToMonth: getDefaultAllocatedMonth(newDate),
                 });
-                setShowAddDialog(false);
                 loadIncomes();
             } else {
                 const error = await res.json();
@@ -201,8 +231,9 @@ export default function SharedPoolIncomePage() {
     const getAvailableMonths = () => {
         const months = new Set<string>();
         incomes.forEach((income) => {
-            const date = new Date(income.date);
-            const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+            const month =
+                income.allocatedToMonth ||
+                `${new Date(income.date).getFullYear()}-${String(new Date(income.date).getMonth() + 1).padStart(2, "0")}`;
             months.add(month);
         });
         return Array.from(months).sort();
@@ -426,18 +457,20 @@ export default function SharedPoolIncomePage() {
                             </DialogHeader>
                             <form onSubmit={handleSubmit} className="space-y-6">
                                 <div className="space-y-2">
-                                    <Label htmlFor="user">User</Label>
+                                    <Label htmlFor="user">
+                                        Household Member
+                                    </Label>
                                     <Select
-                                        value={formData.userId}
+                                        value={formData.householdMemberId}
                                         onValueChange={(value) =>
                                             setFormData({
                                                 ...formData,
-                                                userId: value,
+                                                householdMemberId: value,
                                             })
                                         }
                                     >
                                         <SelectTrigger>
-                                            <SelectValue placeholder="Select user" />
+                                            <SelectValue placeholder="Select household member" />
                                         </SelectTrigger>
                                         <SelectContent>
                                             {users.map((user) => (
@@ -458,12 +491,17 @@ export default function SharedPoolIncomePage() {
                                         id="date"
                                         type="date"
                                         value={formData.date}
-                                        onChange={(e) =>
+                                        onChange={(e) => {
+                                            const newDate = e.target.value;
                                             setFormData({
                                                 ...formData,
-                                                date: e.target.value,
-                                            })
-                                        }
+                                                date: newDate,
+                                                allocatedToMonth:
+                                                    getDefaultAllocatedMonth(
+                                                        newDate,
+                                                    ),
+                                            });
+                                        }}
                                         required
                                     />
                                 </div>
@@ -484,6 +522,35 @@ export default function SharedPoolIncomePage() {
                                         }
                                         required
                                     />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="type">Type</Label>
+                                    <Select
+                                        value={formData.type}
+                                        onValueChange={(value) =>
+                                            setFormData({
+                                                ...formData,
+                                                type: value,
+                                                allocatedToMonth:
+                                                    getDefaultAllocatedMonth(
+                                                        formData.date,
+                                                    ),
+                                            })
+                                        }
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select type" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="salary">
+                                                Salary
+                                            </SelectItem>
+                                            <SelectItem value="extras">
+                                                Extras
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
 
                                 <div className="space-y-2">
@@ -540,8 +607,8 @@ export default function SharedPoolIncomePage() {
                                         </SelectContent>
                                     </Select>
                                     <p className="text-xs text-muted-foreground">
-                                        Leave empty to auto-allocate: income
-                                        received on day 22+ goes to next month
+                                        Income received after day 22 defaults to
+                                        next month
                                     </p>
                                 </div>
 

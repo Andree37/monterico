@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const account = await prisma.account.findFirst({
+        const account = await prisma.bankAccount.findFirst({
             where: {
                 bankConnectionId: bankConnectionId,
                 id: accountId,
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
             : null;
 
         // Update account with latest balance information
-        const updatedAccount = await prisma.account.update({
+        const updatedAccount = await prisma.bankAccount.update({
             where: { id: accountId },
             data: {
                 currentBalance: currentBalance,

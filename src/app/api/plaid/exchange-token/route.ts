@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
 
         const accounts = await Promise.all(
             accountsResponse.data.accounts.map(async (acc) => {
-                return await prisma.account.create({
+                return await prisma.bankAccount.create({
                     data: {
                         bankConnectionId: bankConnection.id,
                         accountId: acc.account_id,

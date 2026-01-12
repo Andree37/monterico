@@ -1,147 +1,166 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { auth } from "@/auth/config";
 
-// GET all users with their split ratios
+// GET all household members for a user
 export async function GET() {
     try {
-        const users = await prisma.user.findMany({
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
+
+        const members = await prisma.householdMember.findMany({
+            where: {
+                userId,
+            },
             orderBy: {
                 createdAt: "asc",
             },
         });
 
-        // Get split ratios for each user
-        const usersWithRatios = await Promise.all(
-            users.map(async (user) => {
-                const splitRatio = await prisma.userSplitRatio.findUnique({
-                    where: { userId: user.id },
-                });
+        // Get split ratios for each member
+        const membersWithRatios = await Promise.all(
+            members.map(async (member) => {
+                const splitRatio =
+                    await prisma.householdMemberSplitRatio.findUnique({
+                        where: { householdMemberId: member.id },
+                    });
 
                 return {
-                    ...user,
+                    ...member,
                     ratio: splitRatio?.ratio || 0.5,
-                    isActive: splitRatio?.isActive ?? true,
                 };
             }),
         );
 
-        return NextResponse.json(usersWithRatios);
+        return NextResponse.json(membersWithRatios);
     } catch (error) {
-        console.error("Error fetching users:", error);
+        console.error("Error fetching household members:", error);
         return NextResponse.json(
-            { error: "Failed to fetch users" },
+            { error: "Failed to fetch household members" },
             { status: 500 },
         );
     }
 }
 
-// POST - Create a new user
+// POST - Create a new household member
 export async function POST(request: Request) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
         const body = await request.json();
-        const { name, email, ratio } = body;
+        const { name, ratio } = body;
 
         if (!name) {
             return NextResponse.json(
-                { error: "Name is required" },
+                { error: "name is required" },
                 { status: 400 },
             );
         }
 
-        // Create user and their split ratio in a transaction
         const result = await prisma.$transaction(async (tx) => {
-            const user = await tx.user.create({
+            const member = await tx.householdMember.create({
                 data: {
+                    userId,
                     name,
-                    email: email || null,
+                    isActive: true,
                 },
             });
 
-            // Create split ratio for the user
-            await tx.userSplitRatio.create({
+            // Create split ratio for the member
+            await tx.householdMemberSplitRatio.create({
                 data: {
-                    userId: user.id,
+                    householdMemberId: member.id,
                     ratio: ratio !== undefined ? parseFloat(ratio) : 0.5,
                     isActive: true,
                 },
             });
 
-            return user;
+            return member;
         });
 
         return NextResponse.json(result);
     } catch (error) {
-        console.error("Error creating user:", error);
+        console.error("Error creating household member:", error);
         return NextResponse.json(
-            { error: "Failed to create user" },
+            { error: "Failed to create household member" },
             { status: 500 },
         );
     }
 }
 
-// PATCH - Update user details or ratio
+// PATCH - Update household member details or ratio
 export async function PATCH(request: Request) {
     try {
         const body = await request.json();
-        const { id, name, email, ratio, isActive } = body;
+        const { id, name, ratio, isActive } = body;
 
         if (!id) {
             return NextResponse.json(
-                { error: "User ID is required" },
+                { error: "Household member ID is required" },
                 { status: 400 },
             );
         }
 
-        // Update user and their split ratio in a transaction
+        // Update member and their split ratio in a transaction
         const result = await prisma.$transaction(async (tx) => {
-            // Update user basic info
-            const updateData: { name?: string; email?: string | null } = {};
+            // Update member basic info
+            const updateData: { name?: string; isActive?: boolean } = {};
             if (name !== undefined) updateData.name = name;
-            if (email !== undefined) updateData.email = email || null;
+            if (isActive !== undefined) updateData.isActive = isActive;
 
-            let user;
+            let member;
             if (Object.keys(updateData).length > 0) {
-                user = await tx.user.update({
+                member = await tx.householdMember.update({
                     where: { id },
                     data: updateData,
                 });
             } else {
-                user = await tx.user.findUnique({ where: { id } });
+                member = await tx.householdMember.findUnique({ where: { id } });
             }
 
             // Update or create split ratio
-            if (ratio !== undefined || isActive !== undefined) {
-                const splitRatioData: { ratio?: number; isActive?: boolean } =
-                    {};
-                if (ratio !== undefined)
-                    splitRatioData.ratio = parseFloat(ratio);
-                if (isActive !== undefined) splitRatioData.isActive = isActive;
-
-                await tx.userSplitRatio.upsert({
-                    where: { userId: id },
-                    update: splitRatioData,
+            if (ratio !== undefined) {
+                await tx.householdMemberSplitRatio.upsert({
+                    where: { householdMemberId: id },
+                    update: { ratio: parseFloat(ratio) },
                     create: {
-                        userId: id,
-                        ratio: ratio !== undefined ? parseFloat(ratio) : 0.5,
-                        isActive: isActive !== undefined ? isActive : true,
+                        householdMemberId: id,
+                        ratio: parseFloat(ratio),
+                        isActive: true,
                     },
                 });
             }
 
-            return user;
+            return member;
         });
 
         return NextResponse.json(result);
     } catch (error) {
-        console.error("Error updating user:", error);
+        console.error("Error updating household member:", error);
         return NextResponse.json(
-            { error: "Failed to update user" },
+            { error: "Failed to update household member" },
             { status: 500 },
         );
     }
 }
 
-// DELETE - Delete a user (soft delete by setting isActive to false)
+// DELETE - Delete a household member (soft delete by setting isActive to false)
 export async function DELETE(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
@@ -149,29 +168,25 @@ export async function DELETE(request: Request) {
 
         if (!id) {
             return NextResponse.json(
-                { error: "User ID is required" },
+                { error: "Household member ID is required" },
                 { status: 400 },
             );
         }
 
         // Soft delete - set isActive to false
-        await prisma.userSplitRatio.upsert({
-            where: { userId: id },
-            update: { isActive: false },
-            create: {
-                userId: id,
-                ratio: 0.5,
-                isActive: false,
-            },
+        await prisma.householdMember.update({
+            where: { id },
+            data: { isActive: false },
         });
 
         return NextResponse.json({ success: true });
     } catch (error) {
-        console.error("Error deleting user:", error);
+        console.error("Error deleting household member:", error);
 
-        // Return more detailed error message
         const errorMessage =
-            error instanceof Error ? error.message : "Failed to delete user";
+            error instanceof Error
+                ? error.message
+                : "Failed to delete household member";
         return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 }

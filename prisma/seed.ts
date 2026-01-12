@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
+import bcrypt from "bcryptjs";
 
 const dbUrl = process.env.DATABASE_URL || "file:./dev.db";
 console.log("DB URL:", dbUrl);
@@ -13,63 +14,80 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
     console.log("Seeding database...");
 
-    // Create default users - you can modify this array to add more users
-    const defaultUsers = [
-        {
-            id: "andre",
-            name: "Andre Ribeiro",
+    // Create default user account
+    const hashedPassword = await bcrypt.hash("password123", 10);
+
+    const user = await prisma.user.upsert({
+        where: { email: "andre@example.com" },
+        update: {},
+        create: {
             email: "andre@example.com",
-            ratio: 0.65,
+            password: hashedPassword,
+            mfaRequired: false,
+            mfaSetupComplete: false,
+            accountingMode: "shared_pool",
         },
-        {
-            id: "rita",
-            name: "Rita Pereira",
-            email: "rita@example.com",
-            ratio: 0.35,
-        },
+    });
+
+    console.log("Created user account");
+
+    // Create household members
+    const householdMembers = [
+        { name: "Andre Ribeiro", ratio: 0.65 },
+        { name: "Rita Pereira", ratio: 0.35 },
     ];
 
-    const users = [];
-    for (const userData of defaultUsers) {
-        const user = await prisma.user.upsert({
-            where: { id: userData.id },
-            update: {},
-            create: {
-                id: userData.id,
-                name: userData.name,
-                email: userData.email,
+    const members = [];
+    for (const memberData of householdMembers) {
+        // Check if member already exists
+        let member = await prisma.householdMember.findFirst({
+            where: {
+                userId: user.id,
+                name: memberData.name,
             },
         });
 
-        // Create or update split ratio for the user
-        await prisma.userSplitRatio.upsert({
-            where: { userId: user.id },
-            update: { ratio: userData.ratio, isActive: true },
+        // Create if doesn't exist
+        if (!member) {
+            member = await prisma.householdMember.create({
+                data: {
+                    userId: user.id,
+                    name: memberData.name,
+                    isActive: true,
+                },
+            });
+        }
+
+        // Create split ratio for the household member
+        await prisma.householdMemberSplitRatio.upsert({
+            where: { householdMemberId: member.id },
+            update: { ratio: memberData.ratio, isActive: true },
             create: {
-                userId: user.id,
-                ratio: userData.ratio,
+                householdMemberId: member.id,
+                ratio: memberData.ratio,
                 isActive: true,
             },
         });
 
-        users.push(user);
+        members.push(member);
     }
 
-    console.log(`Created ${users.length} users with split ratios`);
+    console.log(
+        `Created ${members.length} household members with split ratios`,
+    );
 
-    // Create default settings
-    await prisma.settings.upsert({
-        where: { id: "default" },
+    // Create default user settings
+    await prisma.userSettings.upsert({
+        where: { userId: user.id },
         update: {},
         create: {
-            id: "default",
-            defaultPaidBy: users[0]?.id || null,
+            userId: user.id,
             defaultType: "shared",
             defaultSplitType: "equal",
         },
     });
 
-    console.log("Created settings");
+    console.log("Created user settings");
 
     const categories = [
         { name: "Coisas de casa", color: "#FF9800", icon: "🏠" },
@@ -89,15 +107,25 @@ async function main() {
 
     for (const category of categories) {
         await prisma.category.upsert({
-            where: { name: category.name },
+            where: {
+                userId_name: {
+                    userId: user.id,
+                    name: category.name,
+                },
+            },
             update: {},
-            create: category,
+            create: {
+                userId: user.id,
+                name: category.name,
+                color: category.color,
+                icon: category.icon,
+            },
         });
     }
 
     console.log("Created categories");
 
-    // Create sample income for last 3 months and next 2 months (so they allocate to the next month)
+    // Create sample income for last 3 months and next 2 months
     const now = new Date();
     const incomeMonths = [];
     // Past 3 months
@@ -110,9 +138,8 @@ async function main() {
         const date = new Date(now.getFullYear(), now.getMonth() + i, 1);
         incomeMonths.push(date);
     }
-    const months = incomeMonths;
 
-    for (const month of months) {
+    for (const month of incomeMonths) {
         // Rita's salary on the 22nd (allocated to next month)
         const ritaSalaryDate = new Date(
             month.getFullYear(),
@@ -127,7 +154,8 @@ async function main() {
 
         await prisma.income.create({
             data: {
-                userId: users[1].id, // Rita
+                userId: user.id,
+                householdMemberId: members[1].id, // Rita
                 date: ritaSalaryDate.toISOString(),
                 allocatedToMonth: `${ritaSalaryMonth.getFullYear()}-${String(ritaSalaryMonth.getMonth() + 1).padStart(2, "0")}`,
                 description: `Salario - ${ritaSalaryMonth.toLocaleDateString("pt-PT", { month: "long", year: "numeric" })}`,
@@ -151,7 +179,8 @@ async function main() {
 
         await prisma.income.create({
             data: {
-                userId: users[0].id, // Andre
+                userId: user.id,
+                householdMemberId: members[0].id, // Andre
                 date: andreSalaryDate.toISOString(),
                 allocatedToMonth: `${andreSalaryMonth.getFullYear()}-${String(andreSalaryMonth.getMonth() + 1).padStart(2, "0")}`,
                 description: `Salario - ${andreSalaryMonth.toLocaleDateString("pt-PT", { month: "long", year: "numeric" })}`,
@@ -171,24 +200,24 @@ async function main() {
         expenseMonths.push(date);
     }
 
-    // Create sample expenses
+    // Get categories
     const comidaCategory = await prisma.category.findFirst({
-        where: { name: "Comida em casa" },
+        where: { userId: user.id, name: "Comida em casa" },
     });
     const restaurantsCategory = await prisma.category.findFirst({
-        where: { name: "Restaurantes" },
+        where: { userId: user.id, name: "Restaurantes" },
     });
     const transportesCategory = await prisma.category.findFirst({
-        where: { name: "Transportes" },
+        where: { userId: user.id, name: "Transportes" },
     });
     const rendaCategory = await prisma.category.findFirst({
-        where: { name: "Renda" },
+        where: { userId: user.id, name: "Renda" },
     });
     const saudeCategory = await prisma.category.findFirst({
-        where: { name: "Saude" },
+        where: { userId: user.id, name: "Saude" },
     });
     const entretenimentoCategory = await prisma.category.findFirst({
-        where: { name: "Entretenimento" },
+        where: { userId: user.id, name: "Entretenimento" },
     });
 
     const expenseTemplates = [
@@ -268,60 +297,58 @@ async function main() {
                 dayOffset,
             );
 
-            const paidByUser = users[template.paidByIndex % users.length];
+            const paidByMember = members[template.paidByIndex % members.length];
 
             const expense = await prisma.expense.create({
                 data: {
+                    userId: user.id,
                     date: expenseDate.toISOString(),
                     description: template.description,
                     amount:
-                        template.amount + Math.floor(Math.random() * 20) - 10, // Add some variance
+                        template.amount + Math.floor(Math.random() * 20) - 10,
                     currency: "EUR",
                     type: template.type,
                     paid: true,
                     categoryId: template.category.id,
-                    paidById: paidByUser.id,
+                    paidById: paidByMember.id,
                 },
             });
 
             // Create splits
             if (template.type === "shared") {
-                // Get all active users and their ratios
-                const activeUsers = await prisma.user.findMany({
-                    include: {
-                        _count: true,
-                    },
-                });
-
-                const userRatios = await prisma.userSplitRatio.findMany({
+                // Get all active household members and their ratios
+                const activeMembers = await prisma.householdMember.findMany({
                     where: {
-                        userId: { in: activeUsers.map((u) => u.id) },
+                        userId: user.id,
                         isActive: true,
                     },
+                    include: {
+                        splitRatio: true,
+                    },
                 });
 
-                // Calculate split based on ratios (or equal if no ratios)
-                const totalRatio = userRatios.reduce(
-                    (sum, ur) => sum + ur.ratio,
+                const totalRatio = activeMembers.reduce(
+                    (sum, m) => sum + (m.splitRatio?.ratio || 0),
                     0,
                 );
 
-                const splits = userRatios.map((ur) => ({
-                    expenseId: expense.id,
-                    userId: ur.userId,
-                    amount: (expense.amount * ur.ratio) / totalRatio,
-                    paid: ur.userId === paidByUser.id,
-                }));
-
-                await prisma.expenseSplit.createMany({
-                    data: splits,
-                });
+                for (const member of activeMembers) {
+                    const ratio = member.splitRatio?.ratio || 0;
+                    await prisma.expenseSplit.create({
+                        data: {
+                            expenseId: expense.id,
+                            householdMemberId: member.id,
+                            amount: (expense.amount * ratio) / totalRatio,
+                            paid: member.id === paidByMember.id,
+                        },
+                    });
+                }
             } else {
                 // Personal expense
                 await prisma.expenseSplit.create({
                     data: {
                         expenseId: expense.id,
-                        userId: paidByUser.id,
+                        householdMemberId: paidByMember.id,
                         amount: expense.amount,
                         paid: true,
                     },

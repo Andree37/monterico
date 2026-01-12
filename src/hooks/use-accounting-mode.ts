@@ -11,7 +11,6 @@ import {
 
 interface Settings {
     accountingMode: "individual" | "shared_pool";
-    defaultPaidBy: string | null;
     defaultType: string;
     defaultSplitType: string;
 }
@@ -25,14 +24,27 @@ export function useAccountingMode() {
     const loadSettings = useCallback(async () => {
         try {
             const response = await fetch("/api/settings");
-            if (response.ok) {
-                const data = await response.json();
-                if (data.success && data.settings) {
-                    setSettings(data.settings);
-                    setAccountingMode(
-                        data.settings.accountingMode || "individual",
-                    );
-                }
+            if (!response.ok) {
+                setLoading(false);
+                return;
+            }
+
+            const contentType = response.headers.get("content-type");
+            if (!contentType?.includes("application/json")) {
+                setLoading(false);
+                return;
+            }
+
+            const data = await response.json();
+            if (data.success) {
+                const settingsData: Settings = {
+                    accountingMode: data.accountingMode || "individual",
+                    defaultType: data.userSettings?.defaultType || "shared",
+                    defaultSplitType:
+                        data.userSettings?.defaultSplitType || "equal",
+                };
+                setSettings(settingsData);
+                setAccountingMode(data.accountingMode || "individual");
             }
         } catch (error) {
             console.error("Error loading accounting mode:", error);

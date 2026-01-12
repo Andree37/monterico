@@ -14,23 +14,22 @@ import { CheckCircle2, XCircle, Wallet } from "lucide-react";
 import { useAccountingMode } from "@/hooks/use-accounting-mode";
 import { AccountingModeWarning } from "@/components/AccountingModeIndicator";
 
-interface User {
+interface HouseholdMember {
     id: string;
     name: string;
-    email: string | null;
 }
 
 interface Reimbursement {
     id: string;
     userId: string;
-    userName: string;
+    householdMemberId: string;
     month: string;
     amount: number;
     description: string;
     settled: boolean;
     createdAt: string;
     settledAt?: string;
-    user: User;
+    householdMember: HouseholdMember;
 }
 
 export default function ReimbursementsPage() {
@@ -153,15 +152,15 @@ export default function ReimbursementsPage() {
     // Calculate pending reimbursements by user
     const pendingByUser = pendingReimbursements.reduce(
         (acc, r) => {
-            if (!acc[r.userId]) {
-                acc[r.userId] = {
-                    userName: r.user.name,
+            if (!acc[r.householdMemberId]) {
+                acc[r.householdMemberId] = {
+                    userName: r.householdMember.name,
                     total: 0,
                     count: 0,
                 };
             }
-            acc[r.userId].total += r.amount;
-            acc[r.userId].count += 1;
+            acc[r.householdMemberId].total += r.amount;
+            acc[r.householdMemberId].count += 1;
             return acc;
         },
         {} as Record<
@@ -349,7 +348,11 @@ export default function ReimbursementsPage() {
                                                     Paid by:
                                                 </span>
                                                 <span className="font-medium text-blue-900">
-                                                    {reimbursement.user.name}
+                                                    {
+                                                        reimbursement
+                                                            .householdMember
+                                                            .name
+                                                    }
                                                 </span>
                                             </div>
                                             <span className="text-muted-foreground">

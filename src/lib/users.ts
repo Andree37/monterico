@@ -1,201 +1,168 @@
-import { User } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
-export interface UserWithRatio extends User {
-    ratio: number;
+export interface HouseholdMemberWithRatio {
+    id: string;
+    userId: string;
+    name: string;
     isActive: boolean;
+    ratio: number;
+    createdAt: Date;
+    updatedAt: Date;
 }
 
-/**
- * Get all active users with their split ratios
- */
-export async function getActiveUsers(): Promise<UserWithRatio[]> {
-    const users = await prisma.user.findMany({
-        orderBy: {
-            createdAt: "asc",
-        },
-    });
-
-    const usersWithRatios = await Promise.all(
-        users.map(async (user) => {
-            const splitRatio = await prisma.userSplitRatio.findUnique({
-                where: { userId: user.id },
-            });
-
-            return {
-                ...user,
-                ratio: splitRatio?.ratio || 0.5,
-                isActive: splitRatio?.isActive ?? true,
-            };
-        }),
-    );
-
-    // Filter only active users
-    return usersWithRatios.filter((user) => user.isActive);
-}
-
-/**
- * Get all users (including inactive) with their split ratios
- */
-export async function getAllUsers(): Promise<UserWithRatio[]> {
-    const users = await prisma.user.findMany({
-        orderBy: {
-            createdAt: "asc",
-        },
-    });
-
-    const usersWithRatios = await Promise.all(
-        users.map(async (user) => {
-            const splitRatio = await prisma.userSplitRatio.findUnique({
-                where: { userId: user.id },
-            });
-
-            return {
-                ...user,
-                ratio: splitRatio?.ratio || 0.5,
-                isActive: splitRatio?.isActive ?? true,
-            };
-        }),
-    );
-
-    return usersWithRatios;
-}
-
-/**
- * Get a user by ID with their ratio
- */
-export async function getUserById(
+export async function getActiveHouseholdMembers(
     userId: string,
-): Promise<UserWithRatio | null> {
-    const user = await prisma.user.findUnique({
-        where: { id: userId },
+): Promise<HouseholdMemberWithRatio[]> {
+    const members = await prisma.householdMember.findMany({
+        where: {
+            userId,
+            isActive: true,
+        },
+        orderBy: {
+            createdAt: "asc",
+        },
     });
 
-    if (!user) {
+    const membersWithRatios = await Promise.all(
+        members.map(async (member) => {
+            const splitRatio =
+                await prisma.householdMemberSplitRatio.findUnique({
+                    where: { householdMemberId: member.id },
+                });
+
+            return {
+                ...member,
+                ratio: splitRatio?.ratio || 0.5,
+            };
+        }),
+    );
+
+    return membersWithRatios;
+}
+
+export async function getAllHouseholdMembers(
+    userId: string,
+): Promise<HouseholdMemberWithRatio[]> {
+    const members = await prisma.householdMember.findMany({
+        where: {
+            userId,
+        },
+        orderBy: {
+            createdAt: "asc",
+        },
+    });
+
+    const membersWithRatios = await Promise.all(
+        members.map(async (member) => {
+            const splitRatio =
+                await prisma.householdMemberSplitRatio.findUnique({
+                    where: { householdMemberId: member.id },
+                });
+
+            return {
+                ...member,
+                ratio: splitRatio?.ratio || 0.5,
+            };
+        }),
+    );
+
+    return membersWithRatios;
+}
+
+export async function getHouseholdMemberById(
+    memberId: string,
+): Promise<HouseholdMemberWithRatio | null> {
+    const member = await prisma.householdMember.findUnique({
+        where: { id: memberId },
+    });
+
+    if (!member) {
         return null;
     }
 
-    const splitRatio = await prisma.userSplitRatio.findUnique({
-        where: { userId: user.id },
+    const splitRatio = await prisma.householdMemberSplitRatio.findUnique({
+        where: { householdMemberId: member.id },
     });
 
     return {
-        ...user,
+        ...member,
         ratio: splitRatio?.ratio || 0.5,
-        isActive: splitRatio?.isActive ?? true,
     };
 }
 
-/**
- * Calculate expense splits based on user ratios
- */
-export async function calculateExpenseSplits(
-    amount: number,
-    splitType: "equal" | "ratio" | "custom" = "equal",
-    customSplits?: { userId: string; amount: number }[],
-): Promise<{ userId: string; amount: number }[]> {
-    if (splitType === "custom" && customSplits) {
-        return customSplits;
-    }
-
-    const activeUsers = await getActiveUsers();
-
-    if (activeUsers.length === 0) {
-        throw new Error("No active users found");
-    }
-
-    if (splitType === "equal") {
-        const splitAmount = amount / activeUsers.length;
-        return activeUsers.map((user) => ({
-            userId: user.id,
-            amount: splitAmount,
-        }));
-    }
-
-    // splitType === "ratio"
-    const totalRatio = activeUsers.reduce((sum, user) => sum + user.ratio, 0);
-
-    if (totalRatio === 0) {
-        throw new Error("Total ratio is zero");
-    }
-
-    return activeUsers.map((user) => ({
-        userId: user.id,
-        amount: (amount * user.ratio) / totalRatio,
-    }));
-}
-
-/**
- * Normalize ratios to ensure they sum to 1.0
- */
-export function normalizeRatios(
-    userRatios: { userId: string; ratio: number }[],
-): { userId: string; ratio: number }[] {
-    const totalRatio = userRatios.reduce((sum, ur) => sum + ur.ratio, 0);
-
-    if (totalRatio === 0) {
-        // If all ratios are 0, distribute equally
-        const equalRatio = 1.0 / userRatios.length;
-        return userRatios.map((ur) => ({
-            ...ur,
-            ratio: equalRatio,
-        }));
-    }
-
-    return userRatios.map((ur) => ({
-        ...ur,
-        ratio: ur.ratio / totalRatio,
-    }));
-}
-
-/**
- * Get user statistics for balances and spending
- */
-export async function getUserStatistics(
+export async function createHouseholdMember(
     userId: string,
-    startDate?: Date,
-    endDate?: Date,
-) {
-    const whereClause: {
-        splits: { some: { userId: string } };
-        date?: { gte?: Date; lte?: Date };
-    } = {
-        splits: {
-            some: {
-                userId: userId,
-            },
-        },
-    };
-
-    if (startDate || endDate) {
-        whereClause.date = {};
-        if (startDate) whereClause.date.gte = startDate;
-        if (endDate) whereClause.date.lte = endDate;
-    }
-
-    const expenses = await prisma.expense.findMany({
-        where: whereClause,
-        include: {
-            splits: true,
-            category: true,
+    name: string,
+    ratio?: number,
+): Promise<HouseholdMemberWithRatio> {
+    const member = await prisma.householdMember.create({
+        data: {
+            userId,
+            name,
+            isActive: true,
         },
     });
 
-    const totalSpent = expenses.reduce((sum, expense) => {
-        const userSplit = expense.splits.find((s) => s.userId === userId);
-        return sum + (userSplit?.amount || 0);
-    }, 0);
-
-    const totalPaid = expenses
-        .filter((e) => e.paidById === userId)
-        .reduce((sum, expense) => sum + expense.amount, 0);
-
-    const balance = totalPaid - totalSpent;
+    await prisma.householdMemberSplitRatio.create({
+        data: {
+            householdMemberId: member.id,
+            ratio: ratio !== undefined ? ratio : 0.5,
+            isActive: true,
+        },
+    });
 
     return {
-        totalSpent,
-        totalPaid,
-        balance,
-        expenseCount: expenses.length,
+        ...member,
+        ratio: ratio !== undefined ? ratio : 0.5,
     };
+}
+
+export async function updateHouseholdMember(
+    memberId: string,
+    data: {
+        name?: string;
+        isActive?: boolean;
+        ratio?: number;
+    },
+): Promise<HouseholdMemberWithRatio | null> {
+    const updateData: { name?: string; isActive?: boolean } = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.isActive !== undefined) updateData.isActive = data.isActive;
+
+    const member = await prisma.householdMember.update({
+        where: { id: memberId },
+        data: updateData,
+    });
+
+    if (data.ratio !== undefined) {
+        await prisma.householdMemberSplitRatio.upsert({
+            where: { householdMemberId: memberId },
+            update: { ratio: data.ratio },
+            create: {
+                householdMemberId: memberId,
+                ratio: data.ratio,
+                isActive: true,
+            },
+        });
+    }
+
+    const splitRatio = await prisma.householdMemberSplitRatio.findUnique({
+        where: { householdMemberId: memberId },
+    });
+
+    return {
+        ...member,
+        ratio: splitRatio?.ratio || 0.5,
+    };
+}
+
+export async function deleteHouseholdMember(
+    memberId: string,
+): Promise<boolean> {
+    await prisma.householdMember.update({
+        where: { id: memberId },
+        data: { isActive: false },
+    });
+
+    return true;
 }

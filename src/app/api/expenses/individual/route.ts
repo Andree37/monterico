@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createExpenseSplits } from "@/lib/accounting/individual-accounts";
+import { auth } from "@/auth/config";
 
 /**
  * POST - Create expense in Individual Accounts mode
@@ -8,6 +9,16 @@ import { createExpenseSplits } from "@/lib/accounting/individual-accounts";
  */
 export async function POST(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
         const body = await request.json();
         const {
             date,
@@ -33,6 +44,7 @@ export async function POST(request: NextRequest) {
 
         const expense = await prisma.expense.create({
             data: {
+                userId,
                 date: new Date(date),
                 description,
                 categoryId,
@@ -50,7 +62,7 @@ export async function POST(request: NextRequest) {
             await prisma.expenseSplit.create({
                 data: {
                     expenseId: expense.id,
-                    userId: paidById,
+                    householdMemberId: paidById,
                     amount: parseFloat(amount),
                     paid: true,
                 },
@@ -59,13 +71,16 @@ export async function POST(request: NextRequest) {
             if (customSplits && customSplits.length > 0) {
                 await Promise.all(
                     customSplits.map(
-                        (split: { userId: string; amount: number }) =>
+                        (split: {
+                            householdMemberId: string;
+                            amount: number;
+                        }) =>
                             prisma.expenseSplit.create({
                                 data: {
                                     expenseId: expense.id,
-                                    userId: split.userId,
+                                    householdMemberId: split.householdMemberId,
                                     amount: parseFloat(split.amount.toString()),
-                                    paid: split.userId === paidById,
+                                    paid: split.householdMemberId === paidById,
                                 },
                             }),
                     ),
@@ -75,6 +90,7 @@ export async function POST(request: NextRequest) {
                     expense.id,
                     parseFloat(amount),
                     splitType || "equal",
+                    userId,
                 );
 
                 if (!result.success) {
@@ -109,16 +125,14 @@ export async function POST(request: NextRequest) {
                     select: {
                         id: true,
                         name: true,
-                        email: true,
                     },
                 },
                 splits: {
                     include: {
-                        user: {
+                        householdMember: {
                             select: {
                                 id: true,
                                 name: true,
-                                email: true,
                             },
                         },
                     },

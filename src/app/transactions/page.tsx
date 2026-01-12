@@ -76,6 +76,19 @@ interface TransactionRowProps {
     onUnlink: () => void;
 }
 
+function getDefaultAllocatedMonth(dateString: string): string {
+    const date = new Date(dateString);
+    const day = date.getDate();
+
+    if (day > 22) {
+        date.setMonth(date.getMonth() + 1);
+    }
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    return `${year}-${month}`;
+}
+
 const TransactionRow = memo(function TransactionRow({
     transaction,
     accountingMode,
@@ -298,76 +311,60 @@ const TransactionRow = memo(function TransactionRow({
                                         </SelectContent>
                                     </Select>
 
-                                    {accountingMode === "shared_pool" &&
-                                        importData?.incomeType === "salary" && (
-                                            <Select
-                                                value={
-                                                    importData?.allocatedToMonth ||
-                                                    ""
+                                    <Select
+                                        value={
+                                            importData?.allocatedToMonth ||
+                                            getDefaultAllocatedMonth(
+                                                transaction.date,
+                                            )
+                                        }
+                                        onValueChange={(value) =>
+                                            onImportDataChange(
+                                                "allocatedToMonth",
+                                                value,
+                                            )
+                                        }
+                                    >
+                                        <SelectTrigger className="w-40">
+                                            <SelectValue placeholder="Month" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {(() => {
+                                                const months = [];
+                                                const now = new Date();
+                                                for (let i = -1; i <= 2; i++) {
+                                                    const date = new Date(
+                                                        now.getFullYear(),
+                                                        now.getMonth() + i,
+                                                        1,
+                                                    );
+                                                    const year =
+                                                        date.getFullYear();
+                                                    const month = String(
+                                                        date.getMonth() + 1,
+                                                    ).padStart(2, "0");
+                                                    const monthKey = `${year}-${month}`;
+                                                    const monthName =
+                                                        date.toLocaleDateString(
+                                                            "en-IE",
+                                                            {
+                                                                month: "short",
+                                                                year: "numeric",
+                                                            },
+                                                        );
+                                                    months.push(
+                                                        <SelectItem
+                                                            key={monthKey}
+                                                            value={monthKey}
+                                                        >
+                                                            {monthName}
+                                                        </SelectItem>,
+                                                    );
                                                 }
-                                                onValueChange={(value) =>
-                                                    onImportDataChange(
-                                                        "allocatedToMonth",
-                                                        value,
-                                                    )
-                                                }
-                                            >
-                                                <SelectTrigger className="w-40">
-                                                    <SelectValue placeholder="Month" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {(() => {
-                                                        const months = [];
-                                                        const now = new Date();
-                                                        for (
-                                                            let i = -1;
-                                                            i <= 2;
-                                                            i++
-                                                        ) {
-                                                            const date =
-                                                                new Date(
-                                                                    now.getFullYear(),
-                                                                    now.getMonth() +
-                                                                        i,
-                                                                    1,
-                                                                );
-                                                            const year =
-                                                                date.getFullYear();
-                                                            const month =
-                                                                String(
-                                                                    date.getMonth() +
-                                                                        1,
-                                                                ).padStart(
-                                                                    2,
-                                                                    "0",
-                                                                );
-                                                            const monthKey = `${year}-${month}`;
-                                                            const monthName =
-                                                                date.toLocaleDateString(
-                                                                    "en-IE",
-                                                                    {
-                                                                        month: "short",
-                                                                        year: "numeric",
-                                                                    },
-                                                                );
-                                                            months.push(
-                                                                <SelectItem
-                                                                    key={
-                                                                        monthKey
-                                                                    }
-                                                                    value={
-                                                                        monthKey
-                                                                    }
-                                                                >
-                                                                    {monthName}
-                                                                </SelectItem>,
-                                                            );
-                                                        }
-                                                        return months;
-                                                    })()}
-                                                </SelectContent>
-                                            </Select>
-                                        )}
+                                                return months;
+                                            })()}
+                                        </SelectContent>
+                                    </Select>
 
                                     <Select
                                         value={importData?.paidById || ""}
@@ -557,6 +554,10 @@ export default function TransactionsPage() {
                             ? "/api/income/shared-pool"
                             : "/api/income";
 
+                    const allocatedMonth =
+                        data.allocatedToMonth ||
+                        getDefaultAllocatedMonth(transaction.date);
+
                     const response = await fetch(endpoint, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -565,10 +566,10 @@ export default function TransactionsPage() {
                             description: transaction.name,
                             amount: Math.abs(transaction.amount),
                             currency: transaction.currency || "EUR",
-                            userId: data.paidById,
+                            householdMemberId: data.paidById,
                             type: data.incomeType || "salary",
                             transactionId: transaction.transactionId,
-                            allocatedToMonth: data.allocatedToMonth || null,
+                            allocatedToMonth: allocatedMonth,
                         }),
                     });
 

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useAccountingMode } from "@/hooks/use-accounting-mode";
+import { useSession } from "next-auth/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
     Dialog,
@@ -43,6 +44,19 @@ interface Income {
     user: User;
 }
 
+function getDefaultAllocatedMonth(dateString: string): string {
+    const date = new Date(dateString);
+    const day = date.getDate();
+
+    if (day > 22) {
+        date.setMonth(date.getMonth() + 1);
+    }
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    return `${year}-${month}`;
+}
+
 export default function IndividualIncomePage() {
     const router = useRouter();
     const { accountingMode, loading: modeLoading } = useAccountingMode();
@@ -62,8 +76,14 @@ export default function IndividualIncomePage() {
         date: new Date().toISOString().split("T")[0],
         description: "",
         amount: "",
-        userId: "",
+        householdMemberId: "",
+        type: "salary",
+        allocatedToMonth: getDefaultAllocatedMonth(
+            new Date().toISOString().split("T")[0],
+        ),
     });
+
+    const { data: session } = useSession();
 
     useEffect(() => {
         if (!modeLoading && accountingMode !== "individual") {
@@ -77,15 +97,18 @@ export default function IndividualIncomePage() {
             if (res.ok) {
                 const data = await res.json();
                 setUsers(data);
-                if (data.length > 0 && !formData.userId) {
-                    setFormData((prev) => ({ ...prev, userId: data[0].id }));
+                if (data.length > 0 && !formData.householdMemberId) {
+                    setFormData((prev) => ({
+                        ...prev,
+                        householdMemberId: data[0].id,
+                    }));
                 }
             }
         } catch (error) {
             console.error("Error loading users:", error);
             toast.error("Failed to load users");
         }
-    }, [formData.userId]);
+    }, [formData.householdMemberId]);
 
     const loadIncomes = useCallback(async () => {
         setLoading(true);
@@ -113,11 +136,14 @@ export default function IndividualIncomePage() {
         }
     }, [accountingMode, loadUsers, loadIncomes]);
 
-    // Set initial selected month to current month after incomes load
+    // Set initial selected month to current or next month (after 22nd) after incomes load
     useEffect(() => {
         if (incomes.length > 0 && !selectedMonth) {
-            const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-            setSelectedMonth(currentMonth);
+            const now = new Date();
+            const defaultMonth = getDefaultAllocatedMonth(
+                now.toISOString().split("T")[0],
+            );
+            setSelectedMonth(defaultMonth);
         }
     }, [incomes, selectedMonth]);
 
@@ -125,7 +151,8 @@ export default function IndividualIncomePage() {
         e.preventDefault();
 
         if (
-            !formData.userId ||
+            !session?.user?.id ||
+            !formData.householdMemberId ||
             !formData.amount ||
             parseFloat(formData.amount) <= 0
         ) {
@@ -134,27 +161,34 @@ export default function IndividualIncomePage() {
         }
 
         try {
+            const allocatedMonth =
+                formData.allocatedToMonth ||
+                getDefaultAllocatedMonth(formData.date);
+
             const res = await fetch("/api/income", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    userId: formData.userId,
+                    householdMemberId: formData.householdMemberId,
                     amount: parseFloat(formData.amount),
                     date: formData.date,
                     description: formData.description || null,
-                    allocatedToMonth:
-                        selectedMonth !== "all" ? selectedMonth : null,
+                    type: formData.type,
+                    allocatedToMonth: allocatedMonth,
                 }),
             });
 
             if (res.ok) {
                 toast.success("Income added successfully");
                 setShowAddDialog(false);
+                const newDate = new Date().toISOString().split("T")[0];
                 setFormData({
-                    date: new Date().toISOString().split("T")[0],
+                    date: newDate,
                     description: "",
                     amount: "",
-                    userId: users[0]?.id || "",
+                    householdMemberId: users[0]?.id || "",
+                    type: "salary",
+                    allocatedToMonth: getDefaultAllocatedMonth(newDate),
                 });
                 loadIncomes();
             } else {
@@ -207,8 +241,9 @@ export default function IndividualIncomePage() {
     const getAvailableMonths = () => {
         const months = new Set<string>();
         incomes.forEach((income) => {
-            const date = new Date(income.date);
-            const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+            const month =
+                income.allocatedToMonth ||
+                `${new Date(income.date).getFullYear()}-${String(new Date(income.date).getMonth() + 1).padStart(2, "0")}`;
             months.add(month);
         });
         return Array.from(months).sort();
@@ -286,18 +321,18 @@ export default function IndividualIncomePage() {
                         </DialogHeader>
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
-                                <Label htmlFor="user">User</Label>
+                                <Label htmlFor="user">Household Member</Label>
                                 <Select
-                                    value={formData.userId}
+                                    value={formData.householdMemberId}
                                     onValueChange={(value) =>
                                         setFormData({
                                             ...formData,
-                                            userId: value,
+                                            householdMemberId: value,
                                         })
                                     }
                                 >
                                     <SelectTrigger>
-                                        <SelectValue placeholder="Select user" />
+                                        <SelectValue placeholder="Select household member" />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {users.map((user) => (
@@ -318,12 +353,17 @@ export default function IndividualIncomePage() {
                                     id="date"
                                     type="date"
                                     value={formData.date}
-                                    onChange={(e) =>
+                                    onChange={(e) => {
+                                        const newDate = e.target.value;
                                         setFormData({
                                             ...formData,
-                                            date: e.target.value,
-                                        })
-                                    }
+                                            date: newDate,
+                                            allocatedToMonth:
+                                                getDefaultAllocatedMonth(
+                                                    newDate,
+                                                ),
+                                        });
+                                    }}
                                     required
                                 />
                             </div>
@@ -344,6 +384,89 @@ export default function IndividualIncomePage() {
                                     }
                                     required
                                 />
+                            </div>
+
+                            <div>
+                                <Label htmlFor="type">Type</Label>
+                                <Select
+                                    value={formData.type}
+                                    onValueChange={(value) =>
+                                        setFormData({
+                                            ...formData,
+                                            type: value,
+                                            allocatedToMonth:
+                                                getDefaultAllocatedMonth(
+                                                    formData.date,
+                                                ),
+                                        })
+                                    }
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="salary">
+                                            Salary
+                                        </SelectItem>
+                                        <SelectItem value="extras">
+                                            Extras
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div>
+                                <Label htmlFor="allocatedToMonth">
+                                    Allocated to Month
+                                </Label>
+                                <Select
+                                    value={formData.allocatedToMonth}
+                                    onValueChange={(value) =>
+                                        setFormData({
+                                            ...formData,
+                                            allocatedToMonth: value,
+                                        })
+                                    }
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select month" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {(() => {
+                                            const months = [];
+                                            const now = new Date();
+                                            for (let i = -1; i <= 2; i++) {
+                                                const date = new Date(
+                                                    now.getFullYear(),
+                                                    now.getMonth() + i,
+                                                    1,
+                                                );
+                                                const year = date.getFullYear();
+                                                const month = String(
+                                                    date.getMonth() + 1,
+                                                ).padStart(2, "0");
+                                                const monthKey = `${year}-${month}`;
+                                                const monthName =
+                                                    date.toLocaleDateString(
+                                                        "en-IE",
+                                                        {
+                                                            month: "short",
+                                                            year: "numeric",
+                                                        },
+                                                    );
+                                                months.push(
+                                                    <SelectItem
+                                                        key={monthKey}
+                                                        value={monthKey}
+                                                    >
+                                                        {monthName}
+                                                    </SelectItem>,
+                                                );
+                                            }
+                                            return months;
+                                        })()}
+                                    </SelectContent>
+                                </Select>
                             </div>
 
                             <div>

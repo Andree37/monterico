@@ -10,9 +10,22 @@ import {
     DollarSign,
     Settings,
     Wallet,
+    LogOut,
+    User,
 } from "lucide-react";
 import { AccountingModeIndicator } from "./AccountingModeIndicator";
 import { useAccountingMode } from "@/hooks/use-accounting-mode";
+import { signOut } from "next-auth/react";
+import { Button } from "@/components/ui/button";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useSession } from "next-auth/react";
 
 const navItems = [
     {
@@ -53,6 +66,7 @@ const rightNavItems = [
 export function MainNav() {
     const pathname = usePathname();
     const { accountingMode } = useAccountingMode();
+    const { data: session } = useSession();
 
     const isActive = (href: string) => {
         if (href === "/") {
@@ -72,6 +86,10 @@ export function MainNav() {
         }
         return true;
     });
+
+    if (!session?.user || !session.user.mfaVerified) {
+        return null;
+    }
 
     return (
         <nav className="border-b bg-background">
@@ -125,6 +143,33 @@ export function MainNav() {
                                 );
                             })}
                         </div>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="gap-2"
+                                >
+                                    <User className="h-4 w-4" />
+                                    <span className="hidden md:inline">
+                                        Profile
+                                    </span>
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuLabel>
+                                    {session.user.email}
+                                </DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                    onClick={() => signOut()}
+                                    className="cursor-pointer"
+                                >
+                                    <LogOut className="h-4 w-4 mr-2" />
+                                    Sign out
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     </div>
                 </div>
             </div>

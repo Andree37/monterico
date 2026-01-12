@@ -1,26 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { auth } from "@/auth/config";
 
 // GET - Fetch reimbursements for a specific month or user
 export async function GET(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const authenticatedUserId = session.user.id;
         const { searchParams } = new URL(request.url);
         const monthParam = searchParams.get("month");
-        const userId = searchParams.get("userId");
+        const householdMemberId = searchParams.get("householdMemberId");
         const settled = searchParams.get("settled");
 
         const where: {
             month?: string;
             userId?: string;
+            householdMemberId?: string;
             settled?: boolean;
-        } = {};
+        } = {
+            userId: authenticatedUserId,
+        };
 
         if (monthParam && monthParam !== "all") {
             where.month = monthParam;
         }
 
-        if (userId) {
-            where.userId = userId;
+        if (householdMemberId) {
+            where.householdMemberId = householdMemberId;
         }
 
         if (settled !== null && settled !== undefined) {
@@ -30,7 +44,12 @@ export async function GET(request: NextRequest) {
         const reimbursements = await prisma.reimbursement.findMany({
             where,
             include: {
-                user: true,
+                householdMember: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
                 expenses: {
                     include: {
                         category: true,
@@ -63,12 +82,23 @@ export async function GET(request: NextRequest) {
 // POST - Create a new reimbursement
 export async function POST(request: NextRequest) {
     try {
-        const body = await request.json();
-        const { userId, month, amount, description, expenseId } = body;
+        const session = await auth();
 
-        if (!userId || !month || amount === undefined) {
+        if (!session?.user?.id) {
             return NextResponse.json(
-                { error: "userId, month, and amount are required" },
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
+        const body = await request.json();
+        const { householdMemberId, month, amount, description, expenseId } =
+            body;
+
+        if (!householdMemberId || !month || amount === undefined) {
+            return NextResponse.json(
+                { error: "householdMemberId, month, and amount are required" },
                 { status: 400 },
             );
         }
@@ -76,13 +106,19 @@ export async function POST(request: NextRequest) {
         const reimbursement = await prisma.reimbursement.create({
             data: {
                 userId,
+                householdMemberId,
                 month,
                 amount,
                 description: description || "Reimbursement",
                 settled: false,
             },
             include: {
-                user: true,
+                householdMember: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
             },
         });
 
@@ -112,6 +148,15 @@ export async function POST(request: NextRequest) {
 // PUT - Mark reimbursement as settled
 export async function PUT(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
         const body = await request.json();
         const { id, settled } = body;
 
@@ -129,7 +174,12 @@ export async function PUT(request: NextRequest) {
                 settledAt: settled !== false ? new Date() : null,
             },
             include: {
-                user: true,
+                householdMember: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
                 expenses: true,
             },
         });
@@ -163,6 +213,15 @@ export async function PUT(request: NextRequest) {
 // DELETE - Delete a reimbursement
 export async function DELETE(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
         const { searchParams } = new URL(request.url);
         const id = searchParams.get("id");
 

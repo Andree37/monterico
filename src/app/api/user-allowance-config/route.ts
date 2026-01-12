@@ -1,11 +1,28 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { auth } from "@/auth/config";
 
 export async function GET() {
     try {
-        const configs = await prisma.userAllowanceConfig.findMany({
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { success: false, error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
+
+        const configs = await prisma.householdMemberAllowanceConfig.findMany({
+            where: {
+                householdMember: {
+                    userId,
+                },
+            },
             include: {
-                user: true,
+                householdMember: true,
             },
             orderBy: {
                 createdAt: "asc",
@@ -17,7 +34,10 @@ export async function GET() {
             configs,
         });
     } catch (error) {
-        console.error("Error fetching user allowance configs:", error);
+        console.error(
+            "Error fetching household member allowance configs:",
+            error,
+        );
         return NextResponse.json(
             { success: false, error: "Failed to fetch configs" },
             { status: 500 },
@@ -27,16 +47,44 @@ export async function GET() {
 
 export async function POST(request: Request) {
     try {
-        const body = await request.json();
-        const { userId, type, value } = body;
+        const session = await auth();
 
-        if (!userId || !type || value === undefined) {
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { success: false, error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
+        const body = await request.json();
+        const { householdMemberId, type, value } = body;
+
+        if (!householdMemberId || !type || value === undefined) {
             return NextResponse.json(
                 {
                     success: false,
-                    error: "userId, type, and value are required",
+                    error: "householdMemberId, type, and value are required",
                 },
                 { status: 400 },
+            );
+        }
+
+        // Verify the household member belongs to this user
+        const member = await prisma.householdMember.findFirst({
+            where: {
+                id: householdMemberId,
+                userId,
+            },
+        });
+
+        if (!member) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: "Household member not found or unauthorized",
+                },
+                { status: 404 },
             );
         }
 
@@ -70,21 +118,21 @@ export async function POST(request: Request) {
             );
         }
 
-        const config = await prisma.userAllowanceConfig.upsert({
-            where: { userId },
+        const config = await prisma.householdMemberAllowanceConfig.upsert({
+            where: { householdMemberId },
             update: {
                 type,
                 value,
                 isActive: true,
             },
             create: {
-                userId,
+                householdMemberId,
                 type,
                 value,
                 isActive: true,
             },
             include: {
-                user: true,
+                householdMember: true,
             },
         });
 
@@ -93,7 +141,10 @@ export async function POST(request: Request) {
             config,
         });
     } catch (error) {
-        console.error("Error updating user allowance config:", error);
+        console.error(
+            "Error updating household member allowance config:",
+            error,
+        );
         return NextResponse.json(
             { success: false, error: "Failed to update config" },
             { status: 500 },
@@ -103,25 +154,56 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
     try {
-        const { searchParams } = new URL(request.url);
-        const userId = searchParams.get("userId");
+        const session = await auth();
 
-        if (!userId) {
+        if (!session?.user?.id) {
             return NextResponse.json(
-                { success: false, error: "userId is required" },
+                { success: false, error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
+        const { searchParams } = new URL(request.url);
+        const householdMemberId = searchParams.get("householdMemberId");
+
+        if (!householdMemberId) {
+            return NextResponse.json(
+                { success: false, error: "householdMemberId is required" },
                 { status: 400 },
             );
         }
 
-        await prisma.userAllowanceConfig.delete({
-            where: { userId },
+        // Verify the household member belongs to this user
+        const member = await prisma.householdMember.findFirst({
+            where: {
+                id: householdMemberId,
+                userId,
+            },
+        });
+
+        if (!member) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: "Household member not found or unauthorized",
+                },
+                { status: 404 },
+            );
+        }
+
+        await prisma.householdMemberAllowanceConfig.delete({
+            where: { householdMemberId },
         });
 
         return NextResponse.json({
             success: true,
         });
     } catch (error) {
-        console.error("Error deleting user allowance config:", error);
+        console.error(
+            "Error deleting household member allowance config:",
+            error,
+        );
         return NextResponse.json(
             { success: false, error: "Failed to delete config" },
             { status: 500 },

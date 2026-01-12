@@ -6,21 +6,97 @@ datasource db {
     provider = "sqlite"
 }
 
+// User = Account owner who logs into the app
 model User {
+    id               String    @id @default(uuid())
+    email            String    @unique
+    emailVerified    DateTime?
+    password         String
+    mfaRequired      Boolean   @default(false)
+    mfaSetupComplete Boolean   @default(false)
+    accountingMode   String    @default("individual")
+    createdAt        DateTime  @default(now())
+    updatedAt        DateTime  @updatedAt
+
+    mfaMethods       MFAMethod[]
+    bankConnections  BankConnection[]
+    householdMembers HouseholdMember[]
+    categories       Category[]
+    expenses         Expense[]
+    incomes          Income[]
+    reimbursements   Reimbursement[]
+    userSettings     UserSettings?
+}
+
+// HouseholdMember = People in the user's household (wife, kids, etc.)
+model HouseholdMember {
     id        String   @id @default(uuid())
-    email     String?  @unique
+    userId    String
     name      String
+    isActive  Boolean  @default(true)
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
-    bankConnections     BankConnection[]
-    expenses            Expense[]
-    expenseSplits       ExpenseSplit[]
-    incomes             Income[]
-    personalAllowances  PersonalAllowance[]
-    reimbursements      Reimbursement[]
-    userSplitRatio      UserSplitRatio?
-    userAllowanceConfig UserAllowanceConfig?
+    user            User                            @relation(fields: [userId], references: [id], onDelete: Cascade)
+    expenses        Expense[]
+    expenseSplits   ExpenseSplit[]
+    incomes         Income[]
+    reimbursements  Reimbursement[]
+    splitRatio      HouseholdMemberSplitRatio?
+    allowanceConfig HouseholdMemberAllowanceConfig?
+
+    @@index([userId])
+    @@index([isActive])
+}
+
+model MFAMethod {
+    id        String   @id @default(uuid())
+    userId    String
+    type      String
+    name      String?
+    isActive  Boolean  @default(true)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+    passkeyData    PasskeyData?
+    totpData       TOTPData?
+    backupCodeData BackupCodeData?
+
+    @@index([userId])
+    @@index([type])
+}
+
+model PasskeyData {
+    id           String   @id @default(uuid())
+    mfaMethodId  String   @unique
+    credentialId String   @unique
+    publicKey    String
+    counter      Int      @default(0)
+    transports   String?
+    lastUsedAt   DateTime @default(now())
+
+    mfaMethod MFAMethod @relation(fields: [mfaMethodId], references: [id], onDelete: Cascade)
+
+    @@index([credentialId])
+}
+
+model TOTPData {
+    id          String   @id @default(uuid())
+    mfaMethodId String   @unique
+    secret      String
+    lastUsedAt  DateTime @default(now())
+
+    mfaMethod MFAMethod @relation(fields: [mfaMethodId], references: [id], onDelete: Cascade)
+}
+
+model BackupCodeData {
+    id          String  @id @default(uuid())
+    mfaMethodId String  @unique
+    codes       String
+    usedCodes   String?
+
+    mfaMethod MFAMethod @relation(fields: [mfaMethodId], references: [id], onDelete: Cascade)
 }
 
 model BankConnection {
@@ -35,13 +111,13 @@ model BankConnection {
     updatedAt       DateTime @updatedAt
 
     user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
-    accounts     Account[]
+    accounts     BankAccount[]
     transactions Transaction[]
 
     @@index([userId])
 }
 
-model Account {
+model BankAccount {
     id               String   @id @default(uuid())
     bankConnectionId String
     accountId        String   @unique
@@ -82,7 +158,7 @@ model Transaction {
     updatedAt        DateTime @updatedAt
 
     bankConnection BankConnection @relation(fields: [bankConnectionId], references: [id], onDelete: Cascade)
-    account        Account        @relation(fields: [accountId], references: [accountId], onDelete: Cascade)
+    account        BankAccount    @relation(fields: [accountId], references: [accountId], onDelete: Cascade)
     expense        Expense?       @relation(fields: [expenseId], references: [id], onDelete: SetNull)
     income         Income?        @relation(fields: [incomeId], references: [id], onDelete: SetNull)
 
@@ -95,20 +171,26 @@ model Transaction {
 }
 
 model Category {
-    id          String    @id @default(uuid())
-    name        String    @unique
+    id          String   @id @default(uuid())
+    userId      String
+    name        String
     description String?
     color       String?
     icon        String?
-    createdAt   DateTime  @default(now())
-    updatedAt   DateTime  @updatedAt
-    expenses    Expense[]
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
 
+    user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    expenses Expense[]
+
+    @@unique([userId, name])
+    @@index([userId])
     @@index([name])
 }
 
 model Expense {
     id                 String   @id @default(uuid())
+    userId             String
     date               DateTime
     description        String
     categoryId         String
@@ -123,12 +205,14 @@ model Expense {
     createdAt          DateTime @default(now())
     updatedAt          DateTime @updatedAt
 
-    category      Category       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-    paidBy        User           @relation(fields: [paidById], references: [id], onDelete: Cascade)
+    user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+    category      Category        @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+    paidBy        HouseholdMember @relation(fields: [paidById], references: [id], onDelete: Cascade)
     splits        ExpenseSplit[]
     transactions  Transaction[]
-    reimbursement Reimbursement? @relation(fields: [reimbursementId], references: [id], onDelete: SetNull)
+    reimbursement Reimbursement?  @relation(fields: [reimbursementId], references: [id], onDelete: SetNull)
 
+    @@index([userId])
     @@index([date])
     @@index([categoryId])
     @@index([paidById])
@@ -137,123 +221,106 @@ model Expense {
 }
 
 model ExpenseSplit {
-    id        String   @id @default(uuid())
-    expenseId String
-    userId    String
-    amount    Float
-    paid      Boolean  @default(false)
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+    id                String   @id @default(uuid())
+    expenseId         String
+    householdMemberId String
+    amount            Float
+    paid              Boolean  @default(false)
+    createdAt         DateTime @default(now())
+    updatedAt         DateTime @updatedAt
 
-    expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
-    user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+    expense         Expense         @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+    householdMember HouseholdMember @relation(fields: [householdMemberId], references: [id], onDelete: Cascade)
 
-    @@unique([expenseId, userId])
+    @@unique([expenseId, householdMemberId])
     @@index([expenseId])
-    @@index([userId])
+    @@index([householdMemberId])
 }
 
 model Income {
-    id               String   @id @default(uuid())
-    userId           String
-    date             DateTime
-    allocatedToMonth String?
-    description      String
-    amount           Float
-    currency         String   @default("EUR")
-    type             String
-    createdAt        DateTime @default(now())
-    updatedAt        DateTime @updatedAt
+    id                String   @id @default(uuid())
+    userId            String
+    householdMemberId String
+    date              DateTime
+    allocatedToMonth  String?
+    description       String
+    amount            Float
+    currency          String   @default("EUR")
+    type              String
+    createdAt         DateTime @default(now())
+    updatedAt         DateTime @updatedAt
 
-    user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-    transactions Transaction[]
+    user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+    householdMember HouseholdMember @relation(fields: [householdMemberId], references: [id], onDelete: Cascade)
+    transactions    Transaction[]
 
     @@index([userId])
+    @@index([householdMemberId])
     @@index([date])
     @@index([type])
     @@index([allocatedToMonth])
 }
 
-model Settings {
+model UserSettings {
     id               String   @id @default(uuid())
-    defaultPaidBy    String?
+    userId           String   @unique
     defaultType      String   @default("shared")
     defaultSplitType String   @default("equal")
-    accountingMode   String   @default("individual")
     createdAt        DateTime @default(now())
     updatedAt        DateTime @updatedAt
-}
-
-model UserSplitRatio {
-    id        String   @id @default(uuid())
-    userId    String   @unique
-    ratio     Float    @default(0.5)
-    isActive  Boolean  @default(true)
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
 
     user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
     @@index([userId])
+}
+
+model HouseholdMemberSplitRatio {
+    id                String   @id @default(uuid())
+    householdMemberId String   @unique
+    ratio             Float    @default(0.5)
+    isActive          Boolean  @default(true)
+    createdAt         DateTime @default(now())
+    updatedAt         DateTime @updatedAt
+
+    householdMember HouseholdMember @relation(fields: [householdMemberId], references: [id], onDelete: Cascade)
+
+    @@index([householdMemberId])
     @@index([isActive])
 }
 
-model UserAllowanceConfig {
-    id        String   @id @default(uuid())
-    userId    String   @unique
-    type      String   @default("percentage")
-    value     Float
-    isActive  Boolean  @default(true)
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+model HouseholdMemberAllowanceConfig {
+    id                String   @id @default(uuid())
+    householdMemberId String   @unique
+    type              String   @default("percentage")
+    value             Float
+    isActive          Boolean  @default(true)
+    createdAt         DateTime @default(now())
+    updatedAt         DateTime @updatedAt
 
-    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+    householdMember HouseholdMember @relation(fields: [householdMemberId], references: [id], onDelete: Cascade)
 
-    @@index([userId])
+    @@index([householdMemberId])
     @@index([isActive])
-}
-
-model PoolBalance {
-    id        String   @id @default(uuid())
-    balance   Float    @default(0)
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-}
-
-model PersonalAllowance {
-    id          String   @id @default(uuid())
-    userId      String
-    month       String
-    allocated   Float    @default(0)
-    spent       Float    @default(0)
-    remaining   Float    @default(0)
-    carriedOver Float    @default(0)
-    carriedTo   Float    @default(0)
-    createdAt   DateTime @default(now())
-    updatedAt   DateTime @updatedAt
-
-    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-    @@unique([userId, month])
-    @@index([userId])
-    @@index([month])
 }
 
 model Reimbursement {
-    id          String    @id @default(uuid())
-    userId      String
-    month       String
-    amount      Float
-    description String
-    settled     Boolean   @default(false)
-    settledAt   DateTime?
-    createdAt   DateTime  @default(now())
-    updatedAt   DateTime  @updatedAt
+    id                String    @id @default(uuid())
+    userId            String
+    householdMemberId String
+    month             String
+    amount            Float
+    description       String
+    settled           Boolean   @default(false)
+    settledAt         DateTime?
+    createdAt         DateTime  @default(now())
+    updatedAt         DateTime  @updatedAt
 
-    user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-    expenses Expense[]
+    user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+    householdMember HouseholdMember @relation(fields: [householdMemberId], references: [id], onDelete: Cascade)
+    expenses        Expense[]
 
     @@index([userId])
+    @@index([householdMemberId])
     @@index([month])
     @@index([settled])
 }

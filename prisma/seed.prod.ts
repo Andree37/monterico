@@ -13,6 +13,7 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
     console.log("Seeding production database...");
 
+    // Create default categories for this user
     const categories = [
         { name: "Coisas de casa", color: "#FF9800", icon: "🏠" },
         { name: "Comida em casa", color: "#4CAF50", icon: "🍽️" },
@@ -30,15 +31,34 @@ async function main() {
     ];
 
     for (const category of categories) {
-        await prisma.category.upsert({
-            where: { name: category.name },
-            update: {},
-            create: category,
+        await prisma.category.create({
+            data: {
+                userId: "01b6e857-a376-4a89-a2d8-152718f7f098",
+                name: category.name,
+                color: category.color,
+                icon: category.icon,
+            },
         });
     }
 
-    console.log(`Created ${categories.length} categories`);
-    console.log("Production seeding completed!");
+    // Create user settings
+    await prisma.userSettings.create({
+        data: {
+            userId: "01b6e857-a376-4a89-a2d8-152718f7f098",
+            defaultType: "shared",
+            defaultSplitType: "equal",
+        },
+    });
+
+    console.log("Created user settings");
+
+    console.log("\n✅ Production seeding completed!");
+    console.log("\nYou can now log in with:");
+    console.log(`  Email: admin@example.com`);
+    console.log(`  Password: changeme123`);
+    console.log(
+        "\n⚠️  IMPORTANT: Change the password immediately after first login!",
+    );
 }
 
 main()

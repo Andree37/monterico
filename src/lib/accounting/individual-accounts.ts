@@ -1,18 +1,27 @@
 import { prisma } from "@/lib/db";
 
-export async function calculateIndividualBalances(): Promise<{
+export async function calculateIndividualBalances(userId: string): Promise<{
     balances: Array<{
-        userId: string;
-        userName: string;
+        householdMemberId: string;
+        memberName: string;
         netBalance: number;
-        owes: Array<{ userId: string; userName: string; amount: number }>;
-        owedBy: Array<{ userId: string; userName: string; amount: number }>;
+        owes: Array<{
+            householdMemberId: string;
+            memberName: string;
+            amount: number;
+        }>;
+        owedBy: Array<{
+            householdMemberId: string;
+            memberName: string;
+            amount: number;
+        }>;
     }>;
     error?: string;
 }> {
     try {
-        // Get all users with their split ratios
-        const users = await prisma.user.findMany({
+        // Get all household members for this user with their split ratios
+        const members = await prisma.householdMember.findMany({
+            where: { userId },
             include: {
                 expenseSplits: {
                     include: {
@@ -26,29 +35,37 @@ export async function calculateIndividualBalances(): Promise<{
             },
         });
 
-        const balances = users.map((user) => {
+        const balances = members.map((member) => {
             let netBalance = 0;
             const owes: Record<
                 string,
-                { userId: string; userName: string; amount: number }
+                {
+                    householdMemberId: string;
+                    memberName: string;
+                    amount: number;
+                }
             > = {};
             const owedBy: Record<
                 string,
-                { userId: string; userName: string; amount: number }
+                {
+                    householdMemberId: string;
+                    memberName: string;
+                    amount: number;
+                }
             > = {};
 
-            user.expenseSplits.forEach((split) => {
+            member.expenseSplits.forEach((split) => {
                 const expense = split.expense;
                 const paidBy = expense.paidBy;
 
                 if (split.paid) {
                     netBalance += split.amount;
                 } else {
-                    if (paidBy.id !== user.id) {
+                    if (paidBy.id !== member.id) {
                         if (!owes[paidBy.id]) {
                             owes[paidBy.id] = {
-                                userId: paidBy.id,
-                                userName: paidBy.name,
+                                householdMemberId: paidBy.id,
+                                memberName: paidBy.name,
                                 amount: 0,
                             };
                         }
@@ -58,26 +75,26 @@ export async function calculateIndividualBalances(): Promise<{
                 }
             });
 
-            users.forEach((otherUser) => {
-                if (otherUser.id === user.id) return;
+            members.forEach((otherMember) => {
+                if (otherMember.id === member.id) return;
 
-                otherUser.expenseSplits.forEach((split) => {
-                    if (split.expense.paidById === user.id && !split.paid) {
-                        if (!owedBy[otherUser.id]) {
-                            owedBy[otherUser.id] = {
-                                userId: otherUser.id,
-                                userName: otherUser.name,
+                otherMember.expenseSplits.forEach((split) => {
+                    if (split.expense.paidById === member.id && !split.paid) {
+                        if (!owedBy[otherMember.id]) {
+                            owedBy[otherMember.id] = {
+                                householdMemberId: otherMember.id,
+                                memberName: otherMember.name,
                                 amount: 0,
                             };
                         }
-                        owedBy[otherUser.id].amount += split.amount;
+                        owedBy[otherMember.id].amount += split.amount;
                     }
                 });
             });
 
             return {
-                userId: user.id,
-                userName: user.name,
+                householdMemberId: member.id,
+                memberName: member.name,
                 netBalance,
                 owes: Object.values(owes),
                 owedBy: Object.values(owedBy),
@@ -98,7 +115,7 @@ export async function createExpenseSplits(
     expenseId: string,
     amount: number,
     splitType: string,
-    customSplits?: Array<{ userId: string; amount: number }>,
+    userId: string,
 ): Promise<{ success: boolean; error?: string }> {
     try {
         const expense = await prisma.expense.findUnique({
@@ -109,50 +126,60 @@ export async function createExpenseSplits(
             return { success: false, error: "Expense not found" };
         }
 
-        const users = await prisma.user.findMany();
+        const members = await prisma.householdMember.findMany({
+            where: { userId },
+        });
 
-        const splitRatios = await prisma.userSplitRatio.findMany({
+        const splitRatios = await prisma.householdMemberSplitRatio.findMany({
             where: {
-                userId: { in: users.map((u) => u.id) },
+                householdMemberId: { in: members.map((m) => m.id) },
             },
         });
 
-        const usersWithRatios = users.map((user) => ({
-            ...user,
-            userSplitRatio: splitRatios.find((sr) => sr.userId === user.id),
+        const membersWithRatios = members.map((member) => ({
+            ...member,
+            splitRatio: splitRatios.find(
+                (sr) => sr.householdMemberId === member.id,
+            ),
         }));
 
-        const activeUsers = usersWithRatios.filter(
-            (u) => u.userSplitRatio && u.userSplitRatio.isActive === true,
+        const activeMembers = membersWithRatios.filter(
+            (m) => m.splitRatio && m.splitRatio.isActive === true,
         );
 
-        if (activeUsers.length === 0) {
-            return { success: false, error: "No active users found" };
+        if (activeMembers.length === 0) {
+            return {
+                success: false,
+                error: "No active household members found",
+            };
         }
 
-        let splits: Array<{ userId: string; amount: number; paid: boolean }> =
-            [];
+        let splits: Array<{
+            householdMemberId: string;
+            amount: number;
+            paid: boolean;
+        }> = [];
 
         if (splitType === "equal") {
-            const splitAmount = amount / activeUsers.length;
-            splits = activeUsers.map((user) => ({
-                userId: user.id,
+            const splitAmount = amount / activeMembers.length;
+            splits = activeMembers.map((member) => ({
+                householdMemberId: member.id,
                 amount: splitAmount,
-                paid: user.id === expense.paidById,
+                paid: member.id === expense.paidById,
             }));
         } else if (splitType === "ratio") {
             console.log("=== RATIO SPLIT DEBUG ===");
             console.log(
-                "Active users:",
-                activeUsers.map((u) => ({
-                    id: u.id,
-                    name: u.name,
-                    ratio: u.userSplitRatio?.ratio,
+                "Active members:",
+                activeMembers.map((m) => ({
+                    id: m.id,
+                    name: m.name,
+                    ratio: m.splitRatio?.ratio,
                 })),
             );
 
-            const totalRatio = activeUsers.reduce(
-                (sum, user) => sum + (user.userSplitRatio?.ratio || 0),
+            const totalRatio = activeMembers.reduce(
+                (sum, member) => sum + (member.splitRatio?.ratio || 0),
                 0,
             );
 
@@ -162,36 +189,43 @@ export async function createExpenseSplits(
                 return { success: false, error: "Total ratio is zero" };
             }
 
-            splits = activeUsers.map((user) => {
-                const userRatio = user.userSplitRatio?.ratio || 0;
-                const splitAmount = (amount * userRatio) / totalRatio;
+            splits = activeMembers.map((member) => {
+                const memberRatio = member.splitRatio?.ratio || 0;
+                const splitAmount = (amount * memberRatio) / totalRatio;
                 console.log(
-                    `User ${user.name}: ratio=${userRatio}, amount=${splitAmount}`,
+                    `Member ${member.name}: ratio=${memberRatio}, amount=${splitAmount}`,
                 );
                 return {
-                    userId: user.id,
+                    householdMemberId: member.id,
                     amount: splitAmount,
-                    paid: user.id === expense.paidById,
+                    paid: member.id === expense.paidById,
                 };
             });
 
             console.log("Final splits:", splits);
-        } else if (splitType === "custom" && customSplits) {
-            splits = customSplits.map((split) => ({
-                userId: split.userId,
-                amount: split.amount,
-                paid: split.userId === expense.paidById,
-            }));
+        } else if (splitType === "custom") {
+            return {
+                success: false,
+                error: "Custom splits not yet implemented for household members",
+            };
         } else {
             return { success: false, error: "Invalid split type" };
         }
+
+        if (splits.length === 0) {
+            return { success: false, error: "No splits generated" };
+        }
+
+        await prisma.expenseSplit.deleteMany({
+            where: { expenseId },
+        });
 
         await Promise.all(
             splits.map((split) =>
                 prisma.expenseSplit.create({
                     data: {
                         expenseId,
-                        userId: split.userId,
+                        householdMemberId: split.householdMemberId,
                         amount: split.amount,
                         paid: split.paid,
                     },
@@ -211,13 +245,13 @@ export async function createExpenseSplits(
 
 export async function markSplitAsPaid(
     expenseId: string,
-    userId: string,
+    householdMemberId: string,
 ): Promise<{ success: boolean; error?: string }> {
     try {
         await prisma.expenseSplit.updateMany({
             where: {
                 expenseId,
-                userId,
+                householdMemberId,
             },
             data: {
                 paid: true,
@@ -234,7 +268,7 @@ export async function markSplitAsPaid(
     }
 }
 
-export async function getUserBalance(userId: string): Promise<{
+export async function getMemberBalance(householdMemberId: string): Promise<{
     totalOwed: number;
     totalOwing: number;
     netBalance: number;
@@ -244,7 +278,7 @@ export async function getUserBalance(userId: string): Promise<{
         amount: number;
         date: Date;
         type: "owes" | "owed";
-        otherUser: string;
+        otherMember: string;
     }>;
     error?: string;
 }> {
@@ -252,10 +286,10 @@ export async function getUserBalance(userId: string): Promise<{
         const splits = await prisma.expenseSplit.findMany({
             where: {
                 OR: [
-                    { userId, paid: false },
+                    { householdMemberId, paid: false },
                     {
                         expense: {
-                            paidById: userId,
+                            paidById: householdMemberId,
                         },
                         paid: false,
                     },
@@ -267,7 +301,7 @@ export async function getUserBalance(userId: string): Promise<{
                         paidBy: true,
                     },
                 },
-                user: true,
+                householdMember: true,
             },
         });
 
@@ -279,11 +313,11 @@ export async function getUserBalance(userId: string): Promise<{
             amount: number;
             date: Date;
             type: "owes" | "owed";
-            otherUser: string;
+            otherMember: string;
         }> = [];
 
         splits.forEach((split) => {
-            if (split.userId === userId && !split.paid) {
+            if (split.householdMemberId === householdMemberId && !split.paid) {
                 totalOwing += split.amount;
                 details.push({
                     expenseId: split.expenseId,
@@ -291,9 +325,12 @@ export async function getUserBalance(userId: string): Promise<{
                     amount: split.amount,
                     date: split.expense.date,
                     type: "owes",
-                    otherUser: split.expense.paidBy.name,
+                    otherMember: split.expense.paidBy.name,
                 });
-            } else if (split.expense.paidById === userId && !split.paid) {
+            } else if (
+                split.expense.paidById === householdMemberId &&
+                !split.paid
+            ) {
                 totalOwed += split.amount;
                 details.push({
                     expenseId: split.expenseId,
@@ -301,7 +338,7 @@ export async function getUserBalance(userId: string): Promise<{
                     amount: split.amount,
                     date: split.expense.date,
                     type: "owed",
-                    otherUser: split.user.name,
+                    otherMember: split.householdMember.name,
                 });
             }
         });
@@ -327,21 +364,21 @@ export async function getUserBalance(userId: string): Promise<{
 }
 
 export async function settleDebts(
-    userAId: string,
-    userBId: string,
+    memberAId: string,
+    memberBId: string,
 ): Promise<{ success: boolean; amountSettled: number; error?: string }> {
     try {
         const splits = await prisma.expenseSplit.findMany({
             where: {
                 OR: [
                     {
-                        userId: userAId,
-                        expense: { paidById: userBId },
+                        householdMemberId: memberAId,
+                        expense: { paidById: memberBId },
                         paid: false,
                     },
                     {
-                        userId: userBId,
-                        expense: { paidById: userAId },
+                        householdMemberId: memberBId,
+                        expense: { paidById: memberAId },
                         paid: false,
                     },
                 ],

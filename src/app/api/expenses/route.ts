@@ -1,14 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
+import { auth } from "@/auth/config";
 
 export async function GET(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
         const { searchParams } = new URL(request.url);
         const startDate = searchParams.get("startDate");
         const endDate = searchParams.get("endDate");
 
-        const where: Prisma.ExpenseWhereInput = {};
+        const where: Prisma.ExpenseWhereInput = {
+            userId,
+        };
 
         if (startDate && endDate) {
             where.date = {
@@ -29,7 +42,7 @@ export async function GET(request: NextRequest) {
                 },
                 splits: {
                     include: {
-                        user: {
+                        householdMember: {
                             select: {
                                 id: true,
                                 name: true,
@@ -56,6 +69,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const userId = session.user.id;
         const body = await request.json();
         const {
             date,
@@ -71,6 +94,7 @@ export async function POST(request: NextRequest) {
 
         const expense = await prisma.expense.create({
             data: {
+                userId,
                 date: new Date(date),
                 description,
                 categoryId,
@@ -82,11 +106,11 @@ export async function POST(request: NextRequest) {
                 splits: {
                     create: splits.map(
                         (split: {
-                            userId: string;
+                            householdMemberId: string;
                             amount: number;
                             paid?: boolean;
                         }) => ({
-                            userId: split.userId,
+                            householdMemberId: split.householdMemberId,
                             amount: parseFloat(split.amount.toString()),
                             paid: split.paid || false,
                         }),
@@ -98,7 +122,7 @@ export async function POST(request: NextRequest) {
                 paidBy: true,
                 splits: {
                     include: {
-                        user: true,
+                        householdMember: true,
                     },
                 },
             },
@@ -128,6 +152,15 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
         const body = await request.json();
         const { id, paid } = body;
 
@@ -139,7 +172,7 @@ export async function PUT(request: NextRequest) {
                 paidBy: true,
                 splits: {
                     include: {
-                        user: true,
+                        householdMember: true,
                     },
                 },
             },
@@ -157,7 +190,7 @@ export async function PUT(request: NextRequest) {
                 paidBy: true,
                 splits: {
                     include: {
-                        user: true,
+                        householdMember: true,
                     },
                 },
             },

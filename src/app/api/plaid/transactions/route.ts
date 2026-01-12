@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
 
         await Promise.all(
             response.data.accounts.map(async (acc) => {
-                await prisma.account.update({
+                await prisma.bankAccount.update({
                     where: { accountId: acc.account_id },
                     data: {
                         currentBalance: acc.balances.current,

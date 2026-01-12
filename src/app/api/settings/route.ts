@@ -1,27 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { processIncomeForSharedPool } from "@/lib/accounting/shared-pool";
+import { auth } from "@/auth/config";
 
+/**
+ * GET - Fetch current user's settings
+ * Returns accountingMode and userSettings for the authenticated user
+ */
 export async function GET() {
     try {
-        // Get the first (and should be only) settings record
-        let settings = await prisma.settings.findFirst();
+        const session = await auth();
 
-        // If no settings exist, create default ones
-        if (!settings) {
-            settings = await prisma.settings.create({
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: {
+                id: true,
+                email: true,
+                accountingMode: true,
+                userSettings: true,
+            },
+        });
+
+        if (!user) {
+            return NextResponse.json(
+                { error: "User not found" },
+                { status: 404 },
+            );
+        }
+
+        // Create default user settings if they don't exist
+        let userSettings = user.userSettings;
+        if (!userSettings) {
+            userSettings = await prisma.userSettings.create({
                 data: {
-                    defaultPaidBy: null,
+                    userId: user.id,
                     defaultType: "shared",
                     defaultSplitType: "equal",
-                    accountingMode: "individual",
                 },
             });
         }
 
         return NextResponse.json({
             success: true,
-            settings,
+            accountingMode: user.accountingMode,
+            userSettings: {
+                defaultType: userSettings.defaultType,
+                defaultSplitType: userSettings.defaultSplitType,
+            },
         });
     } catch (error: unknown) {
         console.error("Error fetching settings:", error);
@@ -31,78 +62,69 @@ export async function GET() {
     }
 }
 
+/**
+ * POST - Update user settings
+ * Updates accountingMode and/or userSettings for the authenticated user
+ */
 export async function POST(request: NextRequest) {
     try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Unauthorized" },
+                { status: 401 },
+            );
+        }
+
         const body = await request.json();
-        const { defaultPaidBy, defaultType, defaultSplitType, accountingMode } =
-            body;
+        const { accountingMode, defaultType, defaultSplitType } = body;
 
-        // Get existing settings or create if none exist
-        let settings = await prisma.settings.findFirst();
-        const previousMode = settings?.accountingMode || "individual";
+        const userId = session.user.id;
 
-        if (settings) {
-            // Update existing settings
-            settings = await prisma.settings.update({
-                where: { id: settings.id },
-                data: {
-                    defaultPaidBy:
-                        defaultPaidBy !== undefined
-                            ? defaultPaidBy
-                            : settings.defaultPaidBy,
-                    defaultType: defaultType || settings.defaultType,
-                    defaultSplitType:
-                        defaultSplitType || settings.defaultSplitType,
-                    accountingMode: accountingMode || settings.accountingMode,
-                },
+        // Update accounting mode if provided
+        if (accountingMode !== undefined) {
+            await prisma.user.update({
+                where: { id: userId },
+                data: { accountingMode },
             });
-        } else {
-            // Create new settings
-            settings = await prisma.settings.create({
-                data: {
-                    defaultPaidBy: defaultPaidBy || null,
+        }
+
+        // Update user settings if provided
+        if (defaultType !== undefined || defaultSplitType !== undefined) {
+            const updateData: {
+                defaultType?: string;
+                defaultSplitType?: string;
+            } = {};
+            if (defaultType !== undefined) updateData.defaultType = defaultType;
+            if (defaultSplitType !== undefined)
+                updateData.defaultSplitType = defaultSplitType;
+
+            await prisma.userSettings.upsert({
+                where: { userId },
+                update: updateData,
+                create: {
+                    userId,
                     defaultType: defaultType || "shared",
                     defaultSplitType: defaultSplitType || "equal",
-                    accountingMode: accountingMode || "individual",
                 },
             });
         }
 
-        // Initialize shared pool if switching from individual to shared_pool
-        if (previousMode === "individual" && accountingMode === "shared_pool") {
-            // Get all existing income and process it through the pool
-            const allIncome = await prisma.income.findMany({
-                orderBy: { date: "asc" },
-            });
+        // Fetch updated settings
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                accountingMode: true,
+                userSettings: true,
+            },
+        });
 
-            for (const income of allIncome) {
-                await processIncomeForSharedPool(
-                    income.userId,
-                    income.amount,
-                    new Date(income.date),
-                    income.allocatedToMonth || undefined,
-                );
-            }
-        }
-
-        const response: {
-            success: boolean;
-            settings: typeof settings;
-            message?: string;
-            poolInitialized?: boolean;
-        } = {
+        return NextResponse.json({
             success: true,
-            settings,
-        };
-
-        // Add message if pool was initialized
-        if (previousMode === "individual" && accountingMode === "shared_pool") {
-            response.message =
-                "Shared pool initialized with existing income data";
-            response.poolInitialized = true;
-        }
-
-        return NextResponse.json(response);
+            accountingMode: user?.accountingMode,
+            userSettings: user?.userSettings,
+        });
     } catch (error: unknown) {
         console.error("Error saving settings:", error);
         const message =
