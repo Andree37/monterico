@@ -51,6 +51,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 token.mfaSetupComplete = user.mfaSetupComplete;
                 token.mfaRequired = user.mfaRequired;
                 token.mfaVerified = false;
+                token.bankOperationMfaVerifiedAt = null;
             }
 
             // Handle session updates from client
@@ -60,6 +61,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 }
                 if (session.user?.mfaVerified !== undefined) {
                     token.mfaVerified = session.user.mfaVerified;
+                }
+                if (session.user?.bankOperationMfaVerifiedAt !== undefined) {
+                    token.bankOperationMfaVerifiedAt =
+                        session.user.bankOperationMfaVerifiedAt;
                 }
             }
 
@@ -94,6 +99,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     token.mfaSetupComplete as boolean;
                 session.user.mfaRequired = token.mfaRequired as boolean;
                 session.user.mfaVerified = token.mfaVerified as boolean;
+                session.user.bankOperationMfaVerifiedAt =
+                    token.bankOperationMfaVerifiedAt as number | null;
             }
             return session;
         },

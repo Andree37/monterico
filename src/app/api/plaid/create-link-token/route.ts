@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { plaidClient } from "@/lib/plaid";
 import { CountryCode, Products } from "plaid";
+import { requireBankOperationMfa } from "@/lib/session";
 
 export async function POST(request: NextRequest) {
     try {
+        const mfaCheck = await requireBankOperationMfa();
+        if ("error" in mfaCheck) {
+            return NextResponse.json(
+                { error: mfaCheck.error, code: mfaCheck.code },
+                { status: mfaCheck.status },
+            );
+        }
+
         const { userId } = await request.json();
 
         const response = await plaidClient.linkTokenCreate({

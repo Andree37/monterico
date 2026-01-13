@@ -1,20 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth/config";
+import { getAuthenticatedUser } from "@/lib/session";
 import { prisma } from "@/lib/db";
 
 export async function GET() {
     try {
-        const session = await auth();
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
+        const { userId } = await getAuthenticatedUser();
 
         const mfaMethods = await prisma.mFAMethod.findMany({
             where: {
-                userId: session.user.id,
+                userId,
                 isActive: true,
             },
             select: {
@@ -48,13 +42,7 @@ export async function GET() {
 
 export async function DELETE(request: NextRequest) {
     try {
-        const session = await auth();
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
+        const { userId } = await getAuthenticatedUser();
 
         const { methodId } = await request.json();
         if (!methodId) {
@@ -65,14 +53,14 @@ export async function DELETE(request: NextRequest) {
         }
 
         // Check if this is the last MFA method
-        const activeMethods = await prisma.mFAMethod.count({
+        const remainingMethods = await prisma.mFAMethod.count({
             where: {
-                userId: session.user.id,
+                userId,
                 isActive: true,
             },
         });
 
-        if (activeMethods <= 1) {
+        if (remainingMethods <= 1) {
             return NextResponse.json(
                 { error: "Cannot delete last MFA method" },
                 { status: 400 },
@@ -83,7 +71,7 @@ export async function DELETE(request: NextRequest) {
         const method = await prisma.mFAMethod.findFirst({
             where: {
                 id: methodId,
-                userId: session.user.id,
+                userId,
             },
         });
 

@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createEnableBankingClient } from "@/lib/enablebanking/client";
 import { prisma } from "@/lib/db";
+import { requireBankOperationMfa } from "@/lib/session";
 
 export async function POST(request: NextRequest) {
     try {
+        const mfaCheck = await requireBankOperationMfa();
+        if ("error" in mfaCheck) {
+            return NextResponse.json(
+                { error: mfaCheck.error, code: mfaCheck.code },
+                { status: mfaCheck.status },
+            );
+        }
+
         const { bankConnectionId } = await request.json();
 
         if (!bankConnectionId) {

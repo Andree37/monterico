@@ -1,20 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { auth } from "@/auth/config";
+import { getAuthenticatedUser } from "@/lib/session";
 
 // GET - Fetch reimbursements for a specific month or user
 export async function GET(request: NextRequest) {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
-        const authenticatedUserId = session.user.id;
+        const { userId: authenticatedUserId } = await getAuthenticatedUser();
         const { searchParams } = new URL(request.url);
         const monthParam = searchParams.get("month");
         const householdMemberId = searchParams.get("householdMemberId");
@@ -82,16 +73,7 @@ export async function GET(request: NextRequest) {
 // POST - Create a new reimbursement
 export async function POST(request: NextRequest) {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
-        const userId = session.user.id;
+        const { userId } = await getAuthenticatedUser();
         const body = await request.json();
         const { householdMemberId, month, amount, description, expenseId } =
             body;
@@ -148,15 +130,6 @@ export async function POST(request: NextRequest) {
 // PUT - Mark reimbursement as settled
 export async function PUT(request: NextRequest) {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
         const body = await request.json();
         const { id, settled } = body;
 
@@ -213,15 +186,6 @@ export async function PUT(request: NextRequest) {
 // DELETE - Delete a reimbursement
 export async function DELETE(request: NextRequest) {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
         const { searchParams } = new URL(request.url);
         const id = searchParams.get("id");
 

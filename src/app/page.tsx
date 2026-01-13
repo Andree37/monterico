@@ -12,6 +12,8 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 import { Loader2, RefreshCw, Trash2, Building2 } from "lucide-react";
+import { BankMfaDialog } from "@/components/bank-mfa/BankMfaDialog";
+import { bankFetch, isBankMfaError } from "@/lib/bank-fetch";
 
 interface Account {
     id: string;
@@ -46,6 +48,10 @@ export default function Home() {
     const [refreshingBalance, setRefreshingBalance] = useState<string | null>(
         null,
     );
+    const [showMfaDialog, setShowMfaDialog] = useState(false);
+    const [pendingOperation, setPendingOperation] = useState<
+        (() => Promise<void>) | null
+    >(null);
 
     const loadBankConnections = async () => {
         try {
@@ -80,14 +86,17 @@ export default function Home() {
     const refreshBalance = async (connectionId: string, accountId: string) => {
         setRefreshingBalance(accountId);
         try {
-            const response = await fetch("/api/enablebanking/account-details", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    bankConnectionId: connectionId,
-                    accountId: accountId,
-                }),
-            });
+            const response = await bankFetch(
+                "/api/enablebanking/account-details",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        bankConnectionId: connectionId,
+                        accountId: accountId,
+                    }),
+                },
+            );
 
             if (response.ok) {
                 toast.success("Balance refreshed successfully");
@@ -97,6 +106,14 @@ export default function Home() {
                 throw new Error(data.error || "Failed to refresh balance");
             }
         } catch (error) {
+            if (isBankMfaError(error)) {
+                setPendingOperation(
+                    () => () => refreshBalance(connectionId, accountId),
+                );
+                setShowMfaDialog(true);
+                setRefreshingBalance(null);
+                return;
+            }
             toast.error(
                 error instanceof Error
                     ? error.message
@@ -110,18 +127,27 @@ export default function Home() {
     const syncTransactions = async (connectionId: string) => {
         setSyncing(connectionId);
         try {
-            const response = await fetch("/api/enablebanking/transactions", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ bankConnectionId: connectionId }),
-            });
+            const response = await bankFetch(
+                "/api/enablebanking/transactions",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ bankConnectionId: connectionId }),
+                },
+            );
 
             if (response.ok) {
                 toast.success("Transactions synced successfully");
             } else {
                 throw new Error("Failed to sync transactions");
             }
-        } catch {
+        } catch (error) {
+            if (isBankMfaError(error)) {
+                setPendingOperation(() => () => syncTransactions(connectionId));
+                setShowMfaDialog(true);
+                setSyncing(null);
+                return;
+            }
             toast.error("Failed to sync transactions");
         } finally {
             setSyncing(null);
@@ -133,7 +159,7 @@ export default function Home() {
             return;
 
         try {
-            const response = await fetch(
+            const response = await bankFetch(
                 `/api/bank-connections?id=${connectionId}`,
                 {
                     method: "DELETE",
@@ -144,9 +170,26 @@ export default function Home() {
                 toast.success("Bank connection deleted");
                 await loadData();
             }
-        } catch {
+        } catch (error) {
+            if (isBankMfaError(error)) {
+                setPendingOperation(() => () => deleteConnection(connectionId));
+                setShowMfaDialog(true);
+                return;
+            }
             toast.error("Failed to delete connection");
         }
+    };
+
+    const handleMfaSuccess = async () => {
+        if (pendingOperation) {
+            try {
+                await pendingOperation();
+            } catch {
+                toast.error("Operation failed. Please try again.");
+            }
+            setPendingOperation(null);
+        }
+        setShowMfaDialog(false);
     };
 
     return (
@@ -297,6 +340,12 @@ export default function Home() {
                     </div>
                 )}
             </div>
+
+            <BankMfaDialog
+                open={showMfaDialog}
+                onOpenChange={setShowMfaDialog}
+                onSuccess={handleMfaSuccess}
+            />
         </div>
     );
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth/config";
+import { getAuthenticatedUser } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { generateAuthenticationOptions } from "@simplewebauthn/server";
 
@@ -7,16 +7,10 @@ const RP_ID = process.env.NEXT_PUBLIC_RP_ID || "localhost";
 
 export async function POST(_request: NextRequest) {
     try {
-        const session = await auth();
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
+        const { userId } = await getAuthenticatedUser();
 
         const user = await prisma.user.findUnique({
-            where: { id: session.user.id },
+            where: { id: userId },
         });
 
         if (!user) {

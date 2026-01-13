@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireBankOperationMfa } from "@/lib/session";
 
 export async function GET() {
     try {
@@ -41,6 +42,14 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
     try {
+        const mfaCheck = await requireBankOperationMfa();
+        if ("error" in mfaCheck) {
+            return NextResponse.json(
+                { error: mfaCheck.error, code: mfaCheck.code },
+                { status: mfaCheck.status },
+            );
+        }
+
         const body = await request.json();
         const { id, userId } = body;
 
@@ -70,6 +79,14 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
     try {
+        const mfaCheck = await requireBankOperationMfa();
+        if ("error" in mfaCheck) {
+            return NextResponse.json(
+                { error: mfaCheck.error, code: mfaCheck.code },
+                { status: mfaCheck.status },
+            );
+        }
+
         const { searchParams } = new URL(request.url);
         const bankConnectionId = searchParams.get("id");
 

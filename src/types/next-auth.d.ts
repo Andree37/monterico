@@ -10,6 +10,7 @@ declare module "next-auth" {
             mfaSetupComplete: boolean;
             mfaRequired: boolean;
             mfaVerified: boolean;
+            bankOperationMfaVerifiedAt: number | null;
         };
     }
 
@@ -28,5 +29,6 @@ declare module "next-auth/jwt" {
         mfaSetupComplete?: boolean;
         mfaRequired?: boolean;
         mfaVerified?: boolean;
+        bankOperationMfaVerifiedAt?: number | null;
     }
 }

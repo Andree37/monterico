@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { plaidClient } from "@/lib/plaid";
 import { prisma } from "@/lib/db";
+import { requireBankOperationMfa } from "@/lib/session";
 import { CountryCode } from "plaid";
 
 export async function POST(request: NextRequest) {
     try {
-        const { publicToken } = await request.json();
+        const mfaCheck = await requireBankOperationMfa();
+        if ("error" in mfaCheck) {
+            return NextResponse.json(
+                { error: mfaCheck.error, code: mfaCheck.code },
+                { status: mfaCheck.status },
+            );
+        }
+
+        const { publicToken, userId: _userId } = await request.json();
 
         if (!publicToken) {
             return NextResponse.json(

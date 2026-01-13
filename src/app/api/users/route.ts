@@ -1,20 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { auth } from "@/auth/config";
+import { getAuthenticatedUser } from "@/lib/session";
 
 // GET all household members for a user
 export async function GET() {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
-        const userId = session.user.id;
+        const { userId } = await getAuthenticatedUser();
 
         const members = await prisma.householdMember.findMany({
             where: {
@@ -53,16 +44,7 @@ export async function GET() {
 // POST - Create a new household member
 export async function POST(request: Request) {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
-        const userId = session.user.id;
+        const { userId } = await getAuthenticatedUser();
         const body = await request.json();
         const { name, ratio } = body;
 

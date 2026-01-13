@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { auth } from "@/auth/config";
+import { getAuthenticatedUser } from "@/lib/session";
 
 /**
  * GET - Fetch current user's settings
@@ -8,17 +8,10 @@ import { auth } from "@/auth/config";
  */
 export async function GET() {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
+        const { userId } = await getAuthenticatedUser();
 
         const user = await prisma.user.findUnique({
-            where: { id: session.user.id },
+            where: { id: userId },
             select: {
                 id: true,
                 email: true,
@@ -68,19 +61,10 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
+        const { userId } = await getAuthenticatedUser();
 
         const body = await request.json();
         const { accountingMode, defaultType, defaultSplitType } = body;
-
-        const userId = session.user.id;
 
         // Update accounting mode if provided
         if (accountingMode !== undefined) {

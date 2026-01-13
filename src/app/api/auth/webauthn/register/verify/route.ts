@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth/config";
+import { getAuthenticatedUser } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { verifyRegistrationResponse } from "@simplewebauthn/server";
 import type { RegistrationResponseJSON } from "@simplewebauthn/types";
@@ -9,13 +9,7 @@ const ORIGIN = process.env.NEXT_PUBLIC_ORIGIN || "http://localhost:3000";
 
 export async function POST(request: NextRequest) {
     try {
-        const session = await auth();
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
+        const { userId } = await getAuthenticatedUser();
 
         const { credential, challenge, deviceName } = await request.json();
         if (!credential || !challenge) {
@@ -26,7 +20,7 @@ export async function POST(request: NextRequest) {
         }
 
         const user = await prisma.user.findUnique({
-            where: { id: session.user.id },
+            where: { id: userId },
         });
 
         if (!user) {

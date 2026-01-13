@@ -3,21 +3,12 @@ import {
     getSharedPoolSummary,
     getCurrentMonth,
 } from "@/lib/accounting/shared-pool";
-import { auth } from "@/auth/config";
+import { getAuthenticatedUser } from "@/lib/session";
 
 // GET - Fetch shared pool data for a specific month or current month
 export async function GET(request: NextRequest) {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
-        const userId = session.user.id;
+        const { userId } = await getAuthenticatedUser();
         const { searchParams } = new URL(request.url);
         const month = searchParams.get("month") || getCurrentMonth();
 

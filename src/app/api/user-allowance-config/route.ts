@@ -1,19 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { auth } from "@/auth/config";
+import { getAuthenticatedUser } from "@/lib/session";
 
 export async function GET() {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { success: false, error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
-        const userId = session.user.id;
+        const { userId } = await getAuthenticatedUser();
 
         const configs = await prisma.householdMemberAllowanceConfig.findMany({
             where: {
@@ -47,16 +38,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { success: false, error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
-        const userId = session.user.id;
+        const { userId } = await getAuthenticatedUser();
         const body = await request.json();
         const { householdMemberId, type, value } = body;
 
@@ -154,16 +136,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
     try {
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                { success: false, error: "Unauthorized" },
-                { status: 401 },
-            );
-        }
-
-        const userId = session.user.id;
+        const { userId } = await getAuthenticatedUser();
         const { searchParams } = new URL(request.url);
         const householdMemberId = searchParams.get("householdMemberId");
 
