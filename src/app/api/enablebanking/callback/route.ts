@@ -128,76 +128,92 @@ export async function GET(request: NextRequest) {
         });
 
         for (const account of accounts) {
-            const dbAccount = await prisma.bankAccount.create({
-                data: {
-                    bankConnectionId: bankConnection.id,
-                    accountId: account.uid || "unknown",
-                    name: account.name || "Unknown Account",
-                    officialName: account.product,
-                    type: account.cash_account_type || "CACC",
-                    subtype: account.product || "checking",
-                    currentBalance: null,
-                    availableBalance: null,
-                    currency: account.currency,
-                },
-            });
-
-            // Fetch account details (including balance) while session is active
-            if (account.uid) {
-                try {
-                    const accountDetails = await client.getAccountDetails(
-                        sessionId,
-                        account.uid,
-                    );
-
-                    // Parse balance from Enable Banking response
-                    const balances = accountDetails.balances || [];
-                    const availableBalance = balances.find(
-                        (b: { balance_type?: string }) =>
-                            b.balance_type === "ITAV",
-                    );
-                    const bookedBalance = balances.find(
-                        (b: { balance_type?: string }) =>
-                            b.balance_type === "CLBD" ||
-                            b.balance_type === "ITBD",
-                    );
-
-                    const currentBalance = bookedBalance?.balance_amount?.amount
-                        ? parseFloat(bookedBalance.balance_amount.amount)
-                        : availableBalance?.balance_amount?.amount
-                          ? parseFloat(availableBalance.balance_amount.amount)
-                          : null;
-
-                    const availableBalanceAmount = availableBalance
-                        ?.balance_amount?.amount
-                        ? parseFloat(availableBalance.balance_amount.amount)
-                        : null;
-
-                    // Update account with balance information
-                    await prisma.bankAccount.update({
-                        where: { id: dbAccount.id },
-                        data: {
-                            currentBalance: currentBalance,
-                            availableBalance: availableBalanceAmount,
-                        },
-                    });
-                } catch (error) {
-                    console.error("Failed to fetch account details:", error);
+            try {
+                if (!account.uid) {
+                    continue;
                 }
 
-                // Fetch transactions immediately while session is active
-                try {
-                    await fetchAndSaveTransactions(
-                        client,
-                        sessionId,
-                        account.uid,
-                        dbAccount.accountId,
-                        bankConnection.id,
-                    );
-                } catch (error) {
-                    console.error("Failed to fetch transactions:", error);
-                    // Continue with other accounts even if one fails
+                const dbAccount = await prisma.bankAccount.create({
+                    data: {
+                        bankConnectionId: bankConnection.id,
+                        accountId: account.uid,
+                        name: account.name || "Unknown Account",
+                        officialName: account.product,
+                        type: account.cash_account_type || "CACC",
+                        subtype: account.product || "checking",
+                        currentBalance: null,
+                        availableBalance: null,
+                        currency: account.currency,
+                    },
+                });
+
+                // Fetch account details (including balance) while session is active
+                if (account.uid) {
+                    try {
+                        const accountDetails = await client.getAccountDetails(
+                            sessionId,
+                            account.uid,
+                        );
+
+                        // Parse balance from Enable Banking response
+                        const balances = accountDetails.balances || [];
+                        const availableBalance = balances.find(
+                            (b: { balance_type?: string }) =>
+                                b.balance_type === "ITAV",
+                        );
+                        const bookedBalance = balances.find(
+                            (b: { balance_type?: string }) =>
+                                b.balance_type === "CLBD" ||
+                                b.balance_type === "ITBD",
+                        );
+
+                        const currentBalance = bookedBalance?.balance_amount
+                            ?.amount
+                            ? parseFloat(bookedBalance.balance_amount.amount)
+                            : availableBalance?.balance_amount?.amount
+                              ? parseFloat(
+                                    availableBalance.balance_amount.amount,
+                                )
+                              : null;
+
+                        const availableBalanceAmount = availableBalance
+                            ?.balance_amount?.amount
+                            ? parseFloat(availableBalance.balance_amount.amount)
+                            : null;
+
+                        // Update account with balance information
+                        await prisma.bankAccount.update({
+                            where: { id: dbAccount.id },
+                            data: {
+                                currentBalance: currentBalance,
+                                availableBalance: availableBalanceAmount,
+                            },
+                        });
+                    } catch (error) {
+                        console.error(
+                            "Failed to fetch account details:",
+                            error,
+                        );
+                    }
+
+                    // Fetch transactions immediately while session is active
+                    try {
+                        await fetchAndSaveTransactions(
+                            client,
+                            sessionId,
+                            account.uid,
+                            dbAccount.accountId,
+                            bankConnection.id,
+                        );
+                    } catch (error) {
+                        console.error("Failed to fetch transactions:", error);
+                    }
                 }
+            } catch (error) {
+                console.error(
+                    `Failed to process account ${account.name || account.uid}:`,
+                    error,
+                );
             }
         }
 
