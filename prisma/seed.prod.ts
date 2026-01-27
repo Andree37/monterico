@@ -33,22 +33,13 @@ async function main() {
     for (const category of categories) {
         await prisma.category.create({
             data: {
-                userId: "01b6e857-a376-4a89-a2d8-152718f7f098",
+                userId: "0e40e403-d43f-4311-b9b3-31d183378c78",
                 name: category.name,
                 color: category.color,
                 icon: category.icon,
             },
         });
     }
-
-    // Create user settings
-    await prisma.userSettings.create({
-        data: {
-            userId: "01b6e857-a376-4a89-a2d8-152718f7f098",
-            defaultType: "shared",
-            defaultSplitType: "equal",
-        },
-    });
 
     console.log("Created user settings");
 

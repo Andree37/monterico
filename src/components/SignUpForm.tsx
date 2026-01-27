@@ -62,7 +62,7 @@ export function SignUpForm() {
             });
 
             if (signInResult?.ok) {
-                router.push("/auth/mfa-setup");
+                router.push("/auth/signin");
                 router.refresh();
             } else {
                 toast.error("Failed to sign in. Please try again.");

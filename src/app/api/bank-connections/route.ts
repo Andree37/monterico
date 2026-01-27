@@ -16,6 +16,8 @@ export async function GET() {
                         currentBalance: true,
                         availableBalance: true,
                         currency: true,
+                        accountType: true,
+                        ownerId: true,
                     },
                 },
                 _count: {

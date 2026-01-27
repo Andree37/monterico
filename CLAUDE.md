@@ -1,5 +1,7 @@
 # Project Rules for Monterico App
 
+DO NEVER WRITE MARKDOWN OR TEXT FILES WITH SUMMARIES OF CHANGES AT THE END OF CONVERSATIONS.
+
 ## General Guidelines
 - Always use TypeScript with proper typing
 - Follow Next.js 14+ App Router conventions

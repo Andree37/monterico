@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { bankFetch, isBankMfaError } from "@/lib/bank-fetch";
+import { BankMfaDialog } from "@/components/bank-mfa/BankMfaDialog";
 import {
     Dialog,
     DialogContent,
@@ -22,7 +24,7 @@ import {
 
 interface EnableBankingLinkProps {
     userId?: string;
-    onSuccess?: (bankConnectionId: string) => void;
+    onSuccess?: () => void;
 }
 
 interface Bank {
@@ -37,6 +39,10 @@ export function EnableBankingLink({ userId }: EnableBankingLinkProps) {
     const [open, setOpen] = useState(false);
     const [banks, setBanks] = useState<Bank[]>([]);
     const [loadingBanks, setLoadingBanks] = useState(false);
+    const [showMfaDialog, setShowMfaDialog] = useState(false);
+    const [pendingOperation, setPendingOperation] = useState<
+        (() => Promise<void>) | null
+    >(null);
 
     useEffect(() => {
         const fetchBanks = async () => {
@@ -70,7 +76,7 @@ export function EnableBankingLink({ userId }: EnableBankingLinkProps) {
 
         setLoading(true);
         try {
-            const response = await fetch("/api/enablebanking/auth", {
+            const response = await bankFetch("/api/enablebanking/auth", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -107,6 +113,12 @@ export function EnableBankingLink({ userId }: EnableBankingLinkProps) {
 
             window.location.href = data.url;
         } catch (error) {
+            if (isBankMfaError(error)) {
+                setPendingOperation(() => handleConnect);
+                setShowMfaDialog(true);
+                setLoading(false);
+                return;
+            }
             console.error("Enable Banking connection error:", error);
             toast.error(
                 error instanceof Error
@@ -117,88 +129,103 @@ export function EnableBankingLink({ userId }: EnableBankingLinkProps) {
         }
     };
 
+    const handleMfaSuccess = async () => {
+        setShowMfaDialog(false);
+        if (pendingOperation) {
+            await pendingOperation();
+            setPendingOperation(null);
+        }
+    };
+
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                <Button className="w-full" disabled={loading}>
-                    {loading ? (
-                        <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Connecting...
-                        </>
-                    ) : (
-                        "Connect Bank Account"
-                    )}
-                </Button>
-            </DialogTrigger>
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>Connect Your Bank</DialogTitle>
-                    <DialogDescription>
-                        Select your bank to securely connect your account using
-                        Open Banking.
-                    </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                    <div className="space-y-2">
-                        <label
-                            htmlFor="bank-select"
-                            className="text-sm font-medium"
-                        >
-                            Select Bank
-                        </label>
-                        <Select
-                            value={selectedBank}
-                            onValueChange={setSelectedBank}
-                            disabled={loadingBanks}
-                        >
-                            <SelectTrigger id="bank-select">
-                                <SelectValue
-                                    placeholder={
-                                        loadingBanks
-                                            ? "Loading banks..."
-                                            : "Choose your bank"
-                                    }
-                                />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {loadingBanks ? (
-                                    <SelectItem value="loading" disabled>
-                                        Loading banks...
-                                    </SelectItem>
-                                ) : banks.length === 0 ? (
-                                    <SelectItem value="none" disabled>
-                                        No banks available
-                                    </SelectItem>
-                                ) : (
-                                    banks.map((bank) => (
-                                        <SelectItem
-                                            key={bank.id}
-                                            value={bank.id}
-                                        >
-                                            {bank.name}
-                                        </SelectItem>
-                                    ))
-                                )}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <Button
-                        onClick={handleConnect}
-                        disabled={loading || !selectedBank || loadingBanks}
-                        className="w-full"
-                    >
+        <>
+            <BankMfaDialog
+                open={showMfaDialog}
+                onOpenChange={setShowMfaDialog}
+                onSuccess={handleMfaSuccess}
+            />
+            <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                    <Button className="w-full" disabled={loading}>
                         {loading ? (
                             <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                 Connecting...
                             </>
                         ) : (
-                            "Continue"
+                            "Connect Bank Account"
                         )}
                     </Button>
-                </div>
-            </DialogContent>
-        </Dialog>
+                </DialogTrigger>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Connect Your Bank</DialogTitle>
+                        <DialogDescription>
+                            Select your bank to securely connect your account
+                            using Open Banking.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label
+                                htmlFor="bank-select"
+                                className="text-sm font-medium"
+                            >
+                                Select Bank
+                            </label>
+                            <Select
+                                value={selectedBank}
+                                onValueChange={setSelectedBank}
+                                disabled={loadingBanks}
+                            >
+                                <SelectTrigger id="bank-select">
+                                    <SelectValue
+                                        placeholder={
+                                            loadingBanks
+                                                ? "Loading banks..."
+                                                : "Choose your bank"
+                                        }
+                                    />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {loadingBanks ? (
+                                        <SelectItem value="loading" disabled>
+                                            Loading banks...
+                                        </SelectItem>
+                                    ) : banks.length === 0 ? (
+                                        <SelectItem value="none" disabled>
+                                            No banks available
+                                        </SelectItem>
+                                    ) : (
+                                        banks.map((bank) => (
+                                            <SelectItem
+                                                key={bank.id}
+                                                value={bank.id}
+                                            >
+                                                {bank.name}
+                                            </SelectItem>
+                                        ))
+                                    )}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <Button
+                            onClick={handleConnect}
+                            disabled={loading || !selectedBank || loadingBanks}
+                            className="w-full"
+                        >
+                            {loading ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Connecting...
+                                </>
+                            ) : (
+                                "Continue"
+                            )}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 }

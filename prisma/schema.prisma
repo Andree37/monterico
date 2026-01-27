@@ -44,6 +44,7 @@ model HouseholdMember {
     reimbursements  Reimbursement[]
     splitRatio      HouseholdMemberSplitRatio?
     allowanceConfig HouseholdMemberAllowanceConfig?
+    bankAccounts    BankAccount[]
 
     @@index([userId])
     @@index([isActive])
@@ -128,14 +129,19 @@ model BankAccount {
     currentBalance   Float?
     availableBalance Float?
     currency         String?
+    accountType      String? // "personal" or "joint"
+    ownerId          String? // HouseholdMember id for personal accounts
     createdAt        DateTime @default(now())
     updatedAt        DateTime @updatedAt
 
-    bankConnection BankConnection @relation(fields: [bankConnectionId], references: [id], onDelete: Cascade)
+    bankConnection BankConnection   @relation(fields: [bankConnectionId], references: [id], onDelete: Cascade)
+    owner          HouseholdMember? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
     transactions   Transaction[]
 
     @@index([bankConnectionId])
     @@index([accountId])
+    @@index([ownerId])
+    @@index([accountType])
 }
 
 model Transaction {
@@ -154,6 +160,11 @@ model Transaction {
     expenseId        String?
     linkedToIncome   Boolean  @default(false)
     incomeId         String?
+    counterpartyName String?
+    counterpartyIban String?
+    counterpartyBic  String?
+    paymentReference String?
+    autoDetected     Boolean  @default(false)
     createdAt        DateTime @default(now())
     updatedAt        DateTime @updatedAt
 

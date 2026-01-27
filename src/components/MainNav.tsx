@@ -38,6 +38,7 @@ const navItems = [
         label: "Transactions",
         icon: ArrowLeftRight,
     },
+
     {
         href: "/expenses",
         label: "Expenses",

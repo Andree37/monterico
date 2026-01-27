@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
         const searchParams = request.nextUrl.searchParams;
         const code = searchParams.get("code");
         const sessionId = searchParams.get("session_id");
-        const _state = searchParams.get("state");
+        const state = searchParams.get("state");
         const error = searchParams.get("error");
 
         if (error) {
@@ -119,6 +119,7 @@ export async function GET(request: NextRequest) {
         }
         const bankConnection = await prisma.bankConnection.create({
             data: {
+                userId: state || undefined,
                 itemId: sessionId,
                 accessToken: sessionResponse.access_token || sessionId,
                 institutionId: "enablebanking",

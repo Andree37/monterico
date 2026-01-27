@@ -18,6 +18,9 @@ export default auth((req) => {
         "/api/auth/signin",
         "/api/auth/signup",
         "/api/auth/session",
+        "/api/auth/callback",
+        "/api/auth/csrf",
+        "/api/auth/providers",
     ];
     const isPublicApiRoute = publicApiRoutes.some((route) =>
         pathname.startsWith(route),

@@ -12,7 +12,8 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { aspsp, userId, psuType } = await request.json();
+        const { userId } = mfaCheck;
+        const { aspsp, psuType } = await request.json();
 
         if (!aspsp) {
             return NextResponse.json(
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
         const validUntil = new Date();
         validUntil.setDate(validUntil.getDate() + 90);
 
-        const state = userId || `user_${Date.now()}`;
+        const state = userId;
 
         const authResponse = await client.startAuth({
             access: {

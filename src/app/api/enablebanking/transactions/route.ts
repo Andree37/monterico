@@ -12,7 +12,6 @@ export async function POST(request: NextRequest) {
                 { status: mfaCheck.status },
             );
         }
-
         const { bankConnectionId } = await request.json();
 
         if (!bankConnectionId) {
@@ -43,9 +42,6 @@ export async function POST(request: NextRequest) {
         const dateFrom = startDate.toISOString().split("T")[0];
         const dateTo = endDate.toISOString().split("T")[0];
 
-        let totalTransactions = 0;
-        let newTransactions = 0;
-
         // Use session_id to fetch transactions
         const sessionId = bankConnection.itemId;
 
@@ -64,8 +60,6 @@ export async function POST(request: NextRequest) {
                     );
 
                 for (const transaction of transactionsResponse.transactions) {
-                    totalTransactions++;
-
                     const existingTransaction =
                         await prisma.transaction.findUnique({
                             where: {
@@ -112,7 +106,6 @@ export async function POST(request: NextRequest) {
                                     transaction.debtor?.name,
                             },
                         });
-                        newTransactions++;
                     }
                 }
 
@@ -123,8 +116,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
-            totalTransactions,
-            newTransactions,
+            transactionsStored: bankConnection.accounts.length,
         });
     } catch (error) {
         console.error("Enable Banking sync transactions error:", error);

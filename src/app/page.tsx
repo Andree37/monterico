@@ -11,7 +11,15 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { Loader2, RefreshCw, Trash2, Building2 } from "lucide-react";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Loader2, RefreshCw, Trash2, Building2, Tag } from "lucide-react";
 import { BankMfaDialog } from "@/components/bank-mfa/BankMfaDialog";
 import { bankFetch, isBankMfaError } from "@/lib/bank-fetch";
 
@@ -24,6 +32,14 @@ interface Account {
     currentBalance: number | null;
     availableBalance: number | null;
     currency: string | null;
+    accountType: string | null;
+    ownerId: string | null;
+}
+
+interface HouseholdMember {
+    id: string;
+    name: string;
+    isActive: boolean;
 }
 
 interface BankConnection {
@@ -41,6 +57,9 @@ interface BankConnection {
 
 export default function Home() {
     const [bankConnections, setBankConnections] = useState<BankConnection[]>(
+        [],
+    );
+    const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>(
         [],
     );
     const [loading, setLoading] = useState(true);
@@ -65,10 +84,22 @@ export default function Home() {
         }
     };
 
+    const loadHouseholdMembers = async () => {
+        try {
+            const response = await fetch("/api/household-members");
+            if (response.ok) {
+                const data = await response.json();
+                setHouseholdMembers(data.householdMembers || []);
+            }
+        } catch (error) {
+            console.error("Error loading household members:", error);
+        }
+    };
+
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            await loadBankConnections();
+            await Promise.all([loadBankConnections(), loadHouseholdMembers()]);
         } finally {
             setLoading(false);
         }
@@ -192,6 +223,35 @@ export default function Home() {
         setShowMfaDialog(false);
     };
 
+    const handleTagAccount = async (
+        accountId: string,
+        accountType: string,
+        ownerId?: string,
+    ) => {
+        try {
+            const response = await fetch("/api/bank-accounts/tag", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    accountId,
+                    accountType,
+                    ownerId: accountType === "personal" ? ownerId : null,
+                }),
+            });
+
+            if (response.ok) {
+                toast.success("Account tagged successfully");
+                await loadData();
+            } else {
+                const data = await response.json();
+                toast.error(data.error || "Failed to tag account");
+            }
+        } catch (error) {
+            console.error("Error tagging account:", error);
+            toast.error("Failed to tag account");
+        }
+    };
+
     return (
         <div className="container mx-auto py-8 px-4 max-w-7xl">
             <div className="space-y-4">
@@ -282,54 +342,170 @@ export default function Home() {
                                         {connection.accounts.map((account) => (
                                             <div
                                                 key={account.id}
-                                                className="flex items-center justify-between p-3 bg-muted/50 rounded"
+                                                className="p-3 bg-muted/50 rounded space-y-3"
                                             >
-                                                <div>
-                                                    <p className="font-medium">
-                                                        {account.name}
-                                                    </p>
-                                                    <p className="text-sm text-muted-foreground">
-                                                        {account.type} •{" "}
-                                                        {account.subtype}
-                                                    </p>
-                                                </div>
-                                                <div className="text-right flex items-center gap-2">
+                                                <div className="flex items-center justify-between">
                                                     <div>
-                                                        <p className="font-semibold">
-                                                            €
-                                                            {account.currentBalance?.toFixed(
-                                                                2,
-                                                            ) || "0.00"}
+                                                        <p className="font-medium">
+                                                            {account.name}
                                                         </p>
                                                         <p className="text-sm text-muted-foreground">
-                                                            Available: €
-                                                            {account.availableBalance?.toFixed(
-                                                                2,
-                                                            ) || "0.00"}
+                                                            {account.type} •{" "}
+                                                            {account.subtype}
                                                         </p>
                                                     </div>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() =>
-                                                            refreshBalance(
-                                                                connection.id,
-                                                                account.id,
-                                                            )
+                                                    <div className="text-right flex items-center gap-2">
+                                                        <div>
+                                                            <p className="font-semibold">
+                                                                €
+                                                                {account.currentBalance?.toFixed(
+                                                                    2,
+                                                                ) || "0.00"}
+                                                            </p>
+                                                            <p className="text-sm text-muted-foreground">
+                                                                Available: €
+                                                                {account.availableBalance?.toFixed(
+                                                                    2,
+                                                                ) || "0.00"}
+                                                            </p>
+                                                        </div>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                refreshBalance(
+                                                                    connection.id,
+                                                                    account.id,
+                                                                )
+                                                            }
+                                                            disabled={
+                                                                refreshingBalance ===
+                                                                account.id
+                                                            }
+                                                            title="Refresh balance"
+                                                        >
+                                                            {refreshingBalance ===
+                                                            account.id ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                            ) : (
+                                                                <RefreshCw className="h-4 w-4" />
+                                                            )}
+                                                        </Button>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-4 pt-2 border-t">
+                                                    <div className="flex items-center gap-2">
+                                                        <Tag className="h-4 w-4 text-muted-foreground" />
+                                                        <Label className="text-sm">
+                                                            Account Type:
+                                                        </Label>
+                                                    </div>
+                                                    <Select
+                                                        value={
+                                                            account.accountType ||
+                                                            ""
                                                         }
-                                                        disabled={
-                                                            refreshingBalance ===
-                                                            account.id
-                                                        }
-                                                        title="Refresh balance"
+                                                        onValueChange={(
+                                                            value,
+                                                        ) => {
+                                                            if (
+                                                                value ===
+                                                                "personal"
+                                                            ) {
+                                                                const firstMember =
+                                                                    householdMembers.find(
+                                                                        (m) =>
+                                                                            m.isActive,
+                                                                    );
+                                                                if (
+                                                                    firstMember
+                                                                ) {
+                                                                    handleTagAccount(
+                                                                        account.id,
+                                                                        value,
+                                                                        firstMember.id,
+                                                                    );
+                                                                } else {
+                                                                    toast.error(
+                                                                        "Please create a household member first",
+                                                                    );
+                                                                }
+                                                            } else {
+                                                                handleTagAccount(
+                                                                    account.id,
+                                                                    value,
+                                                                );
+                                                            }
+                                                        }}
                                                     >
-                                                        {refreshingBalance ===
-                                                        account.id ? (
-                                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                                        ) : (
-                                                            <RefreshCw className="h-4 w-4" />
-                                                        )}
-                                                    </Button>
+                                                        <SelectTrigger className="w-35">
+                                                            <SelectValue placeholder="Select type" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="personal">
+                                                                Personal
+                                                            </SelectItem>
+                                                            <SelectItem value="joint">
+                                                                Joint
+                                                            </SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+
+                                                    {account.accountType ===
+                                                        "personal" && (
+                                                        <>
+                                                            <Label className="text-sm">
+                                                                Owner:
+                                                            </Label>
+                                                            <Select
+                                                                value={
+                                                                    account.ownerId ||
+                                                                    ""
+                                                                }
+                                                                onValueChange={(
+                                                                    ownerId,
+                                                                ) =>
+                                                                    handleTagAccount(
+                                                                        account.id,
+                                                                        "personal",
+                                                                        ownerId,
+                                                                    )
+                                                                }
+                                                            >
+                                                                <SelectTrigger className="w-45">
+                                                                    <SelectValue placeholder="Select owner" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {householdMembers
+                                                                        .filter(
+                                                                            (
+                                                                                m,
+                                                                            ) =>
+                                                                                m.isActive,
+                                                                        )
+                                                                        .map(
+                                                                            (
+                                                                                member,
+                                                                            ) => (
+                                                                                <SelectItem
+                                                                                    key={
+                                                                                        member.id
+                                                                                    }
+                                                                                    value={
+                                                                                        member.id
+                                                                                    }
+                                                                                >
+                                                                                    {
+                                                                                        member.name
+                                                                                    }
+                                                                                </SelectItem>
+                                                                            ),
+                                                                        )}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}

@@ -139,6 +139,8 @@ export async function GET(request: NextRequest) {
                         select: {
                             name: true,
                             type: true,
+                            accountType: true,
+                            ownerId: true,
                         },
                     },
                     bankConnection: {
@@ -156,6 +158,8 @@ export async function GET(request: NextRequest) {
                         select: {
                             name: true,
                             type: true,
+                            accountType: true,
+                            ownerId: true,
                         },
                     },
                     bankConnection: {
